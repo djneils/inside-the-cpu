@@ -1,0 +1,2944 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside the CPU</title>
+<style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+</head>
+<body>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root {
+  --bg: #eef1f5;
+  --panel: #ffffff;
+  --paper: #ffffff;
+  --ink: #111418;
+  --muted: #5d6672;
+  --line: #d3d9e1;
+  --red: #e3161d;
+  --red-soft: #fde4e4;
+  --tok: #ffffff;
+  --accent: #1d3557;
+  --accent-ink: #ffffff;
+  --pulse: #d77a9c;
+  --field: #f7f9fb;
+  --ok: #1f7a4d;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --panel: #161c25; --paper: #121821; --ink: #e7ecf3; --muted: #9aa6b5;
+    --line: #2a3441; --red: #ff5157; --red-soft: #3a1719; --tok: #1c2430; --accent: #8fb0e8;
+    --accent-ink: #0d1117; --pulse: #e38fb0; --field: #0f141c; --ok: #5fd39a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161c25; --paper: #121821; --ink: #e7ecf3; --muted: #9aa6b5;
+  --line: #2a3441; --red: #ff5157; --red-soft: #3a1719; --tok: #1c2430; --accent: #8fb0e8;
+  --accent-ink: #0d1117; --pulse: #e38fb0; --field: #0f141c; --ok: #5fd39a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Calibri, Carlito, "Segoe UI", Candara, Arial, sans-serif;
+  font-size: 16px;
+  padding-inline: 16px;
+  padding-block: 10px 32px;
+}
+.wrap { max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+h1 { font-size: 26px; margin: 0; font-weight: 700; letter-spacing: 0.2px; }
+h1 small { font-weight: 400; color: var(--muted); font-size: 17px; margin-left: 10px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, input { font: inherit; color: inherit; }
+.btn {
+  font-size: 15px; padding: 6px 13px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--panel); cursor: pointer; line-height: 1.2;
+}
+.btn:hover { border-color: var(--muted); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.btn.on { border-color: var(--red); color: var(--red); font-weight: 700; }
+.btn:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel); padding: 6px 11px; font-size: 15px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+details.opts { position: relative; }
+details.opts summary { list-style: none; }
+details.opts summary::-webkit-details-marker { display: none; }
+.optpanel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 320px; max-width: calc(100vw - 32px);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 10px; font-size: 15px;
+}
+.optpanel label { display: flex; gap: 8px; align-items: flex-start; }
+.optpanel .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.optpanel select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
+
+.stage { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; position: relative; }
+.stage svg { display: block; width: 100%; min-width: 900px; height: auto; max-height: calc(100vh - 205px); min-height: 480px; }
+#cellEdit {
+  position: absolute; z-index: 5; font-size: 18px; padding: 2px 6px; border: 3px solid var(--red);
+  background: var(--paper); color: var(--ink); text-align: center; border-radius: 3px;
+}
+
+svg text { fill: var(--ink); font-family: Calibri, Carlito, "Segoe UI", Candara, Arial, sans-serif; }
+.box { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; }
+.cpubox { fill: var(--paper); stroke: var(--ink); stroke-width: 3.2; }
+.thin { fill: var(--paper); stroke: var(--ink); stroke-width: 1.1; }
+.wire { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.wire.on { stroke: var(--red); stroke-width: 3.5; }
+.bus { fill: var(--paper); stroke: var(--ink); stroke-width: 1.3; }
+.bus.on { stroke: var(--red); stroke-width: 4.5; fill: var(--red-soft); }
+.hl { fill: none; stroke: var(--red); stroke-width: 4.5; }
+.rowsel { fill: none; stroke: var(--red); stroke-width: 4.5; }
+.cell { cursor: text; }
+.cell:hover { fill: var(--red-soft); }
+.cell.flash { fill: var(--red-soft); }
+.sig { fill: var(--red) !important; font-weight: 700; font-size: 29px; }
+.tick { fill: none; stroke: var(--red); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.tok rect { fill: var(--tok); stroke: var(--red); stroke-width: 2.5; }
+.tok text { fill: var(--red); font-weight: 700; font-size: 21px; }
+.bits rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1; }
+.bits text { font-weight: 700; }
+.split { stroke: var(--red); stroke-width: 3; }
+[data-def] { cursor: pointer; }
+.part { transition: opacity 0.35s; }
+.ghost { opacity: 0; pointer-events: none; }
+.pulse { fill: none; stroke: var(--pulse); stroke-width: 2; }
+.muted { fill: var(--muted) !important; }
+.redtxt { fill: var(--red) !important; }
+
+.console { display: grid; grid-template-columns: auto 1fr; gap: 12px 18px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.ctrls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.speed { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.speed input { width: 110px; accent-color: var(--red); }
+.narr { min-height: 48px; }
+.phase { font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); font-weight: 700; }
+.phase b { color: var(--red); }
+#say { margin: 3px 0 0; font-size: 19px; line-height: 1.35; max-width: 95ch; }
+#say.err { color: var(--red); font-weight: 700; }
+.introNav { display: flex; gap: 8px; align-items: center; }
+.introNav span { font-size: 14px; color: var(--muted); }
+
+.subpanel { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 10px; }
+.inbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 17px; }
+.inbox input { width: 110px; padding: 5px 8px; border: 2px solid var(--red); border-radius: 4px; background: var(--field); font-size: 18px; }
+.info h3 { margin: 0 0 4px; font-size: 18px; }
+.info p { margin: 0; font-size: 17px; line-height: 1.4; max-width: 95ch; }
+.info ul { margin: 6px 0 4px; padding-left: 22px; font-size: 17px; line-height: 1.4; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 2px 24px; }
+.info .small { margin-top: 6px; }
+.vnlink:hover text { fill: var(--red); text-decoration: underline; }
+.info .x { float: right; }
+.qcard { border: 3px solid var(--red); border-radius: 3px; padding: 10px 16px; background: var(--paper); }
+.qcard ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 18px; }
+.qcard .mk { color: var(--muted); margin-left: 6px; }
+.qcard .ans { color: var(--red); font-weight: 700; font-size: 17px; margin-top: 2px; }
+.qhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; flex-wrap: wrap; }
+.qhead strong { font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: var(--red); }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card h2 { font-size: 18px; margin: 0; }
+.cardhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cardhead select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); max-width: 100%; }
+textarea {
+  width: 100%; min-height: 250px; resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--field); color: var(--ink); font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 15px; line-height: 1.45; tab-size: 8;
+}
+.msg { font-size: 15px; color: var(--muted); min-height: 1.3em; }
+.msg.bad { color: var(--red); }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: center; white-space: nowrap; }
+th { background: var(--field); font-weight: 700; }
+td.mono { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 14px; }
+.trace { max-height: 290px; overflow: auto; }
+.outbox { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 20px; min-height: 34px; padding: 4px 10px; background: var(--field); border: 1px solid var(--line); border-radius: 4px; word-break: break-all; }
+.empty { color: var(--muted); font-style: italic; }
+.isa td:first-child, .isa td:nth-child(2) { font-family: Consolas, "Cascadia Mono", Menlo, monospace; }
+.isa td:last-child { text-align: left; white-space: normal; }
+.small { font-size: 14px; color: var(--muted); margin: 0; }
+
+@media (max-width: 900px) {
+  .lower { grid-template-columns: 1fr; }
+  .console { grid-template-columns: 1fr; }
+  h1 small { display: block; margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .part { transition: none; }
+}
+
+
+#blankOut { position: fixed; inset: 0; background: #000; z-index: 300; cursor: none; }
+/* ---------- board mode ---------- */
+.work { display: flex; flex-direction: column; gap: 12px; }
+.boardtools { display: none; }
+body.board { margin: 0; padding-block: 8px; overflow: hidden; }
+body.board .wrap { max-width: none; height: calc(100vh - 16px); }
+body.board header, body.board .lower { display: none; }
+body.board .work { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 10px; height: 100%; min-height: 0; }
+body.board .stage { height: 100%; min-height: 0; overflow: hidden; }
+body.board .stage svg { width: 100%; height: 100%; max-height: none; min-height: 0; min-width: 0; }
+body.board .console { display: flex; flex-direction: column; align-items: stretch; gap: 12px; overflow-y: auto; min-height: 0; padding: 12px; }
+body.board .console > * { flex-shrink: 0; }
+body.board #runCtrls { flex-direction: column; align-items: stretch; gap: 8px; }
+body.board #runCtrls .btn { font-size: 19px; padding: 11px 14px; }
+body.board #stepBtn { font-size: 24px; padding: 18px 14px; }
+body.board .speed { justify-content: space-between; font-size: 16px; }
+body.board .speed input { flex: 1; }
+body.board .introNav { flex-direction: column; align-items: stretch; }
+body.board .introNav .btn { font-size: 19px; padding: 11px 14px; }
+body.board .narr { border-top: 1px solid var(--line); padding-top: 10px; }
+body.board #say { font-size: 20px; }
+body.board .subpanel { border-top: 1px solid var(--line); }
+body.board .info ul { grid-template-columns: 1fr; }
+body.board .qcard ol { font-size: 17px; }
+body.board .boardtools { display: flex; flex-direction: column; gap: 8px; margin-top: auto; border-top: 1px solid var(--line); padding-top: 10px; }
+.bt-prog { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+.bt-prog select { padding: 5px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 15px; }
+.bt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.bt-grid .btn { font-size: 14px; padding: 7px 6px; }
+.bt-grid .btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+#boardExit { font-size: 14px; }
+@media (max-width: 800px) {
+  body.board { overflow: auto; }
+  body.board .wrap { height: auto; }
+  body.board .work { grid-template-columns: 1fr; height: auto; }
+  body.board .stage svg { height: auto; }
+}
+/* ---------- Inside the RAM pop-up ---------- */
+body.mg-open { overflow: hidden; }
+#mgModal { position: fixed; inset: 0; z-index: 100; background: rgba(10, 14, 20, 0.55); display: flex; align-items: flex-start; justify-content: center; padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px 12px; overflow: auto; }
+#mgModal .mg-panel { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; max-width: 1380px; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3); }
+#mgModal .mg-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px; }
+#mgModal .mg-head h2 { margin: 0; font-size: 24px; }
+#mgModal .mg-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#mgModal .mg-stage { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+#mgModal .mg-stage svg { display: block; width: 100%; min-width: 860px; height: auto; max-height: calc(100vh - 290px); min-height: 420px; }
+#mgModal svg text { fill: var(--ink); }
+#mgModal .mg-box { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; }
+#mgModal .mg-cpubox { fill: var(--paper); stroke: var(--ink); stroke-width: 3.2; }
+#mgModal .mg-thin { fill: var(--paper); stroke: var(--ink); stroke-width: 1.1; }
+#mgModal .mg-chip { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 6 4; }
+#mgModal .mg-wire { fill: none; stroke: var(--ink); stroke-width: 1.3; }
+#mgModal .mg-wire.on { stroke: var(--red); stroke-width: 3.2; }
+#mgModal .mg-sel { fill: none; stroke: var(--faint, #c3cad3); stroke-width: 1; pointer-events: none; }
+#mgModal .mg-sel.on { stroke: var(--red); stroke-width: 3; }
+#mgModal .mg-cell { fill: var(--paper); fill-opacity: 0; stroke: var(--line); stroke-width: 1; cursor: pointer; }
+#mgModal .mg-cell:hover { fill: var(--red-soft); fill-opacity: 1; }
+#mgModal .mg-cell.bad { fill: var(--red-soft); fill-opacity: 1; stroke: var(--red); stroke-width: 2; }
+#mgModal .mg-cell.na { fill: var(--line); fill-opacity: 0.5; cursor: default; }
+#mgModal .mg-pick { fill: var(--red-soft); stroke: var(--red); stroke-width: 4; pointer-events: none; }
+#mgModal .mg-pick.good { fill: var(--ok-soft, #e1f3e8); stroke: var(--ok, #1f7a4d); }
+#mgModal .mg-bits rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1; }
+#mgModal .mg-bits rect.hi { fill: var(--red-soft); }
+#mgModal .mg-bits text { font-weight: 700; }
+#mgModal .mg-bitbtn { cursor: pointer; }
+#mgModal .mg-bitbtn:hover rect { stroke: var(--red); stroke-width: 2; }
+#mgModal .mg-red { fill: var(--red) !important; font-weight: 700; }
+#mgModal .mg-muted { fill: var(--muted) !important; }
+#mgModal .mg-hl { fill: none; stroke: var(--red); stroke-width: 4.5; }
+#mgModal .mg-dbus { fill: var(--paper); stroke: var(--ink); stroke-width: 1.3; }
+#mgModal .mg-dbus.on { stroke: var(--red); stroke-width: 4; fill: var(--red-soft); }
+#mgModal .mg-dot circle { stroke-width: 2; }
+#mgModal .mg-dot.one circle { fill: var(--red); stroke: var(--red); }
+#mgModal .mg-dot.one text { fill: #ffffff; }
+#mgModal .mg-dot.zero circle { fill: var(--paper); stroke: var(--ink); }
+#mgModal .mg-dot text { font-size: 12px; font-weight: 700; }
+#mgModal .mg-tok rect { fill: var(--paper); stroke: var(--red); stroke-width: 2.5; }
+#mgModal .mg-tok text { fill: var(--red); font-weight: 700; font-size: 18px; }
+#mgModal .mg-val { pointer-events: none; paint-order: stroke; stroke: var(--paper); stroke-width: 6px; stroke-linejoin: round; }
+#mgModal .mg-console { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; }
+#mgModal .mg-ctrls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#mgModal .mg-speed { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+#mgModal .mg-speed input { width: 100px; accent-color: var(--red); }
+#mgModal .mg-addr { display: flex; align-items: center; gap: 6px; font-size: 15px; }
+#mgModal .mg-addr input { width: 64px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
+#mgModal .mg-phase { font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); font-weight: 700; }
+#mgModal .mg-phase b { color: var(--red); }
+#mgModal .mg-say { margin: 3px 0 0; font-size: 18px; line-height: 1.35; max-width: 95ch; }
+#mgModal .mg-say.good { color: var(--ok, #1f7a4d); font-weight: 700; }
+#mgModal .mg-say.bad { color: var(--red); }
+#mgModal .mg-maths { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 8px; font-size: 17px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+#mgModal .mg-maths code { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size: 17px; }
+#mgModal .mg-maths .r { color: var(--red); font-weight: 700; }
+#mgModal .mg-note { font-size: 13px; color: var(--muted); margin: 0; }
+#mgModal .mg-chk { display: flex; gap: 6px; align-items: center; font-size: 15px; }
+@media (max-width: 900px) { #mgModal .mg-console { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Inside the CPU <small>registers, buses and the fetch–decode–execute cycle</small></h1>
+    <div class="tools">
+      <button class="btn" id="introBtn" type="button">Build the CPU</button>
+      <button class="btn" id="mgOpen" type="button">Inside the RAM</button>
+      <div class="seg" role="group" aria-label="Show values as">
+        <button type="button" id="modeAsm" aria-pressed="true">Assembly</button>
+        <button type="button" id="modeBin" aria-pressed="false">Binary</button>
+      </div>
+      <button class="btn on" id="qBtn" type="button" aria-pressed="true">Questions: on</button>
+      <details class="opts" id="optsBox">
+        <summary class="btn">Options</summary>
+        <div class="optpanel">
+          <div class="row"><span>First RAM address</span>
+            <select id="optBase"><option value="0">0</option><option value="1">1</option></select></div>
+          <div class="row"><span>Store instruction</span>
+            <select id="optSto"><option value="STA">STA</option><option value="STO">STO</option></select></div>
+          <label><input type="checkbox" id="optPc" checked> Show PC++ as its own fetch step</label>
+          <label><input type="checkbox" id="optClear" checked> Clear MAR, MDR and CIR at the start of each cycle</label>
+          <p class="small">Keys: space or → for the next step.</p>
+        </div>
+      </details>
+      <button class="btn" id="themeBtn" type="button">Dark mode</button>
+      <button class="btn primary" id="boardBtn" type="button">Board mode</button>
+    </div>
+  </header>
+
+  <div class="work">
+  <div class="stage" id="stage">
+    <svg id="svg" viewBox="0 0 1600 850" role="img" aria-label="Diagram of the CPU connected to RAM by the address, data and control buses">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--ink)"/></marker>
+        <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--red)"/></marker>
+      </defs>
+      <rect x="0" y="0" width="1600" height="850" style="fill: var(--paper)"/>
+
+      <!-- left-hand step list -->
+      <g id="p-list" class="part"><g id="list"></g></g>
+
+      <!-- frame -->
+      <g id="p-frame" class="part">
+        <g data-def="vn" class="vnlink"><rect x="690" y="58" width="320" height="36" fill="transparent"/><text x="850" y="84" text-anchor="middle" font-size="23" font-style="italic">"Von Neumann architecture"</text></g>
+        <g data-def="cpu" class="part">
+          <rect class="thin" x="568" y="85" width="52" height="36"/>
+          <text x="594" y="109" text-anchor="middle" font-size="17">CPU</text>
+        </g>
+        <rect class="cpubox" x="335" y="130" width="515" height="487"/>
+      </g>
+
+      <!-- ALU + ACC -->
+      <g id="p-alu" class="part">
+        <line class="wire" x1="607" y1="293" x2="542" y2="293" marker-end="url(#ah)"/>
+        <g data-def="alu">
+          <rect class="thin" x="347" y="141" width="193" height="184"/>
+          <text x="358" y="167" font-size="26">ALU</text>
+          <text id="aluOp" x="443" y="215" text-anchor="middle" font-size="22" font-weight="700" class="redtxt"></text>
+          <text x="443" y="261" text-anchor="middle" font-size="14">ACCUMULATOR</text>
+        </g>
+        <g data-def="acc">
+          <rect class="box" x="358" y="268" width="170" height="50"/>
+          <g id="v-acc"></g>
+        </g>
+      </g>
+
+      <!-- CU and control bus (inside CPU) -->
+      <g id="p-cu" class="part">
+        <polyline class="wire" points="607,583 723,583"/>
+        <text x="612" y="577" font-size="14">CONTROL BUS</text>
+        <g data-def="cu">
+          <rect class="box" x="723" y="558" width="115" height="49"/>
+          <text x="780" y="589" text-anchor="middle" font-size="17">Control Unit</text>
+        </g>
+        <g data-def="ctrl">
+          <line id="w-ctrl" class="wire" x1="840" y1="575" x2="1036" y2="522" marker-start="url(#ah)" marker-end="url(#ah)"/>
+          <line x1="838" y1="576" x2="1036" y2="522" stroke="transparent" stroke-width="16"/>
+        </g>
+      </g>
+
+      <!-- MAR + address bus -->
+      <g id="p-mar" class="part">
+        <polyline class="wire" points="607,583 607,181 671,181" marker-end="url(#ah)"/>
+        <g data-def="mar">
+          <rect class="box" x="673" y="150" width="170" height="50"/>
+          <text x="677" y="184" font-size="26">MAR</text>
+          <g id="v-mar"></g>
+        </g>
+        <g data-def="addr">
+          <polygon id="bus-addr" class="bus" points="857,150 990,150 990,127 1035,175 990,223 990,200 857,200"/>
+          <text x="922" y="181" text-anchor="middle" font-size="16">ADDRESS BUS</text>
+        </g>
+      </g>
+
+      <!-- MDR + data bus -->
+      <g id="p-mdr" class="part">
+        <line class="wire" x1="607" y1="437" x2="671" y2="437" marker-end="url(#ah)"/>
+        <g data-def="mdr">
+          <rect class="box" x="673" y="415" width="170" height="50"/>
+          <text x="677" y="449" font-size="26">MDR</text>
+          <g id="v-mdr"></g>
+        </g>
+        <g data-def="data">
+          <polygon id="bus-data" class="bus" points="852,435 897,385 897,410 990,410 990,385 1035,435 990,485 990,460 897,460 897,485"/>
+          <text x="943" y="441" text-anchor="middle" font-size="16">DATA BUS</text>
+        </g>
+      </g>
+
+      <!-- PC -->
+      <g id="p-pc" class="part">
+        <line class="wire" x1="542" y1="293" x2="671" y2="293" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <g data-def="pc">
+          <rect class="box" x="673" y="271" width="170" height="50"/>
+          <text x="677" y="305" font-size="26">PC</text>
+          <g id="v-pc"></g>
+        </g>
+      </g>
+
+      <!-- CIR -->
+      <g id="p-cir" class="part">
+        <line class="wire" x1="524" y1="437" x2="671" y2="437" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <g data-def="cir">
+          <rect class="box" x="352" y="420" width="170" height="50"/>
+          <text x="356" y="454" font-size="26">CIR</text>
+          <g id="v-cir"></g>
+          <g id="cirBits"></g>
+        </g>
+      </g>
+
+      <!-- I/O -->
+      <g id="p-io" class="part" data-def="io">
+        <rect class="thin" x="535" y="632" width="80" height="30" stroke-dasharray="4 3"/>
+        <text x="575" y="653" text-anchor="middle" font-size="15">I/O</text>
+      </g>
+
+      <!-- clock -->
+      <g id="p-clock" class="part" data-def="clock">
+        <circle cx="819" cy="660" r="22" class="thin" style="stroke-width: 2"/>
+        <g id="clockTicks"></g>
+        <line id="clockHand" x1="819" y1="660" x2="819" y2="642" style="stroke: var(--ink); stroke-width: 3; stroke-linecap: round"/>
+        <clipPath id="pulseClip"><rect x="862" y="640" width="166" height="46"/></clipPath>
+        <g clip-path="url(#pulseClip)"><path id="pulse" class="pulse" d=""/></g>
+      </g>
+
+      <!-- RAM -->
+      <g id="p-ram" class="part">
+        <g data-def="ram">
+          <text x="1166" y="58" text-anchor="middle" font-size="15">MEMORY UNIT</text>
+          <rect class="thin" x="1128" y="75" width="72" height="47"/>
+          <text x="1164" y="107" text-anchor="middle" font-size="23">RAM</text>
+          <rect class="box" x="1038" y="130" width="262" height="43"/>
+          <line class="wire" x1="1168" y1="130" x2="1168" y2="173"/>
+          <text x="1103" y="162" text-anchor="middle" font-size="27">Address</text>
+          <text x="1234" y="162" text-anchor="middle" font-size="27">Contents</text>
+        </g>
+        <g id="ramRows"></g>
+        <g id="braces"></g>
+        <rect id="rowHl" class="rowsel" x="1038" y="173" width="262" height="38" visibility="hidden"/>
+        <text id="sig" class="sig" x="1169" y="820" text-anchor="middle"></text>
+      </g>
+
+      <g id="p-out" class="part" data-def="io"><g id="outCol"></g></g>
+      <g id="hls"></g>
+      <g id="tokens"></g>
+    </svg>
+  </div>
+
+  <div class="console">
+    <div class="ctrls" id="runCtrls">
+      <button class="btn primary" id="stepBtn" type="button">Next step</button>
+      <button class="btn" id="backBtn" type="button">Step back</button>
+      <button class="btn" id="cycleBtn" type="button">Whole cycle</button>
+      <button class="btn" id="runBtn" type="button">Run</button>
+      <button class="btn" id="resetBtn" type="button">Reset</button>
+      <label class="speed" for="speed">Speed <input type="range" id="speed" min="1" max="6" value="4"> <span id="speedName">Fast</span></label>
+    </div>
+    <div class="introNav" id="introCtrls" hidden>
+      <button class="btn" id="introBack" type="button">Back</button>
+      <button class="btn primary" id="introNext" type="button">Next</button>
+      <button class="btn" id="introExit" type="button">Finish</button>
+      <span id="introCount"></span>
+    </div>
+    <div class="narr">
+      <div class="phase" id="phase"></div>
+      <p id="say"></p>
+    </div>
+    <div class="subpanel inbox" id="inbox" hidden>
+      <label for="inVal"><strong>INP:</strong> type a whole number from −128 to 127</label>
+      <input id="inVal" type="number" min="-128" max="127" step="1">
+      <button class="btn primary" id="inGo" type="button">Enter</button>
+      <span class="msg bad" id="inMsg"></span>
+    </div>
+    <div class="subpanel info" id="info" hidden>
+      <button class="btn x" id="infoX" type="button">Close</button>
+      <h3 id="infoTitle"></h3>
+      <p id="infoText"></p>
+      <ul id="infoList" hidden></ul>
+      <p id="infoNote" class="small" hidden></p>
+    </div>
+    <div class="subpanel" id="qwrap" hidden>
+      <div class="qcard">
+        <div class="qhead"><strong id="qTitle">Questions</strong><button class="btn" id="qShow" type="button">Show answers</button></div>
+        <ol id="qList"></ol>
+      </div>
+    </div>
+    <div class="boardtools" id="boardTools">
+      <label class="bt-prog" for="bExamples"><span>Program</span><select id="bExamples"></select></label>
+      <div class="bt-grid">
+        <button class="btn" type="button" data-proxy="introBtn">Build the CPU</button>
+        <button class="btn" type="button" data-proxy="mgOpen">Inside the RAM</button>
+        <button class="btn" type="button" data-proxy="modeAsm" id="bAsm">Assembly</button>
+        <button class="btn" type="button" data-proxy="modeBin" id="bBin">Binary</button>
+        <button class="btn" type="button" data-proxy="qBtn" id="bQ">Questions: on</button>
+        <button class="btn" type="button" data-proxy="themeBtn" id="bTheme">Dark mode</button>
+      </div>
+      <button class="btn" type="button" id="boardExit">Exit board mode</button>
+    </div>
+  </div>
+  </div>
+
+  <div class="lower">
+    <section class="card">
+      <div class="cardhead">
+        <h2>Program</h2>
+        <select id="examples" aria-label="Example programs"></select>
+      </div>
+      <textarea id="src" spellcheck="false" aria-label="Assembly program"></textarea>
+      <div class="btnrow">
+        <button class="btn primary" id="loadBtn" type="button">Load into RAM</button>
+        <button class="btn" id="clearBtn" type="button">Empty RAM</button>
+      </div>
+      <div class="msg" id="asmMsg"></div>
+      <p class="small">One instruction per line. Labels are optional (e.g. <code>loop LDA count</code>), <code>DAT</code> reserves a memory location for data. You can also click any RAM cell in the diagram and type straight into it.</p>
+      <div class="tablewrap">
+        <table class="isa">
+          <thead><tr><th>Mnemonic</th><th>Opcode</th><th>What it does</th></tr></thead>
+          <tbody id="isaBody"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card">
+      <div class="cardhead">
+        <h2>Trace table</h2>
+        <span class="small">Register values at the end of each cycle</span>
+      </div>
+      <div class="tablewrap trace">
+        <table>
+          <thead><tr><th>Cycle</th><th>Instruction</th><th>PC</th><th>MAR</th><th>MDR</th><th>CIR</th><th>ACC</th><th>Output</th></tr></thead>
+          <tbody id="traceBody"></tbody>
+        </table>
+      </div>
+      <h2>Output</h2>
+      <div class="outbox" id="outBox"></div>
+    </section>
+  </div>
+</div>
+
+
+<div id="blankOut" hidden aria-hidden="true"></div>
+<div id="mgModal" hidden role="dialog" aria-modal="true" aria-labelledby="mgTitle">
+  <div class="mg-panel">
+    <div class="mg-head">
+      <h2 id="mgTitle">Inside the RAM</h2>
+      <div class="mg-tools">
+        <div class="seg" role="group" aria-label="RAM size">
+          <button type="button" id="mgSmall" aria-pressed="true">This RAM (16 locations)</button>
+          <button type="button" id="mgBig" aria-pressed="false">8-bit address (256 locations)</button>
+        </div>
+        <div class="seg" role="group" aria-label="Mode">
+          <button type="button" id="mgExplore" aria-pressed="true">Explore</button>
+          <button type="button" id="mgFind" aria-pressed="false">Find the location</button>
+        </div>
+        <label class="mg-chk" id="mgValsBox"><input type="checkbox" id="mgVals"> Show contents</label>
+        <button class="btn primary" id="mgClose" type="button">Close</button>
+      </div>
+    </div>
+    <div class="mg-stage">
+      <svg id="mgSvg" viewBox="0 0 1180 900" role="img" aria-label="The MAR sends the address along the address bus wires to a row decoder and a column decoder, which select one location in the memory grid">
+        <rect x="0" y="0" width="1180" height="900" style="fill: var(--paper)"/>
+        <text x="884" y="44" text-anchor="middle" font-size="22" font-style="italic">How an address selects a memory location</text>
+        <rect class="mg-thin" x="170" y="22" width="60" height="30"/>
+        <text x="200" y="43" text-anchor="middle" font-size="17">CPU</text>
+        <rect class="mg-cpubox" x="30" y="60" width="340" height="820"/>
+        <rect class="mg-box" x="60" y="92" width="280" height="84"/>
+        <text x="68" y="117" font-size="24">MAR</text>
+        <text id="mgMarDen" x="332" y="117" text-anchor="end" font-size="19"></text>
+        <g id="mgMarBits"></g>
+        <rect class="mg-box" x="120" y="470" width="160" height="56"/>
+        <text x="200" y="504" text-anchor="middle" font-size="18">Control Unit</text>
+        <rect class="mg-box" x="60" y="760" width="280" height="84"/>
+        <text x="68" y="785" font-size="24">MDR</text>
+        <text id="mgMdrDen" x="332" y="785" text-anchor="end" font-size="19"></text>
+        <g id="mgMdrBits"></g>
+        <rect class="mg-chip" x="514" y="200" width="616" height="628"/>
+        <text x="1122" y="219" text-anchor="end" font-size="15" class="mg-muted">MEMORY (RAM)</text>
+        <rect class="mg-box" x="660" y="226" width="448" height="78"/>
+        <text id="mgColTitle" x="884" y="250" text-anchor="middle" font-size="15"></text>
+        <text id="mgColRes" x="884" y="270" text-anchor="middle" font-size="16" class="mg-red"></text>
+        <g id="mgColNums"></g>
+        <rect class="mg-box" x="520" y="330" width="90" height="448"/>
+        <text id="mgRowTitle" x="556" y="430" text-anchor="middle" font-size="15" transform="rotate(-90 556 430)"></text>
+        <text id="mgRowRes" x="542" y="690" text-anchor="middle" font-size="16" class="mg-red" transform="rotate(-90 542 690)"></text>
+        <g id="mgRowNums"></g>
+        <g id="mgDecIn"></g>
+        <g id="mgCells"></g>
+        <g id="mgSelLines"></g>
+        <g id="mgPick"></g>
+        <g id="mgValsLayer"></g>
+        <rect class="mg-box" x="660" y="790" width="448" height="24"/>
+        <text x="884" y="807" text-anchor="middle" font-size="13">DATA IN / OUT</text>
+        <polygon id="mgDbus" class="mg-dbus" points="374,802 404,782 404,792 626,792 626,782 656,802 626,822 626,812 404,812 404,822"/>
+        <text x="515" y="807" text-anchor="middle" font-size="14">DATA BUS</text>
+        <polyline id="mgCtrl" class="mg-wire" points="280,498 355,498 355,866 884,866 884,816"/>
+        <text x="560" y="860" text-anchor="middle" font-size="13">CONTROL BUS</text>
+        <text id="mgSig" x="896" y="860" font-size="20" class="mg-red"></text>
+        <g id="mgWires"></g>
+        <text id="mgBusLabel" x="378" y="216" font-size="14"></text>
+        <g id="mgWireLabels"></g>
+        <g id="mgHls"></g>
+        <g id="mgDots"></g>
+      </svg>
+    </div>
+    <div class="mg-console">
+      <div class="mg-ctrls">
+        <button class="btn primary" id="mgStep" type="button">Next step</button>
+        <button class="btn" id="mgPlay" type="button">Play all</button>
+        <button class="btn" id="mgReset" type="button">Reset</button>
+        <span class="mg-addr" id="mgAddrBox"><label for="mgAddrIn">Address</label><input id="mgAddrIn" type="number" min="0" max="255" step="1"><button class="btn" id="mgRand" type="button">Random</button></span>
+        <button class="btn" id="mgNew" type="button" hidden>New address</button>
+        <label class="mg-speed" for="mgSpeed">Speed <input type="range" id="mgSpeed" min="1" max="5" value="2"></label>
+      </div>
+      <div>
+        <div class="mg-phase" id="mgPhase"></div>
+        <p class="mg-say" id="mgSay"></p>
+      </div>
+      <div class="mg-maths" id="mgMaths"></div>
+    </div>
+    <p class="mg-note" id="mgNote"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.setAttribute("data-theme", "light");
+
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const OPS = { 1: "INP", 2: "OUT", 4: "LDA", 6: "BRA", 7: "BRZ", 8: "BRP", 10: "HLT", 11: "STO", 12: "ADD", 13: "SUB" };
+  const CODES = { INP: 1, OUT: 2, LDA: 4, BRA: 6, BRZ: 7, BRP: 8, HLT: 10, COB: 10, STO: 11, STA: 11, ADD: 12, SUB: 13 };
+  const NEEDS_OPERAND = { LDA: true, STO: true, ADD: true, SUB: true, BRA: true, BRZ: true, BRP: true };
+  const MEANING = {
+    LDA: "load a value from memory into the ACC",
+    STO: "store the value in the ACC into memory",
+    ADD: "add a value from memory to the ACC",
+    SUB: "subtract a value in memory from the ACC",
+    BRA: "branch always: jump to another address",
+    BRZ: "branch if the ACC is zero",
+    BRP: "branch if the ACC is zero or positive",
+    INP: "input a value into the ACC",
+    OUT: "output the value in the ACC",
+    HLT: "halt: stop the program"
+  };
+  const ISA_ORDER = ["LDA", "STO", "ADD", "SUB", "BRA", "BRZ", "BRP", "INP", "OUT", "HLT"];
+
+  const DEF = {
+    vn: ["Von Neumann architecture", "A computer design in which program instructions and data are stored together in the same memory, in the same format (binary), and are carried between the CPU and memory on a single set of buses. Instructions are fetched and executed one at a time.",
+      ["A single control unit", "A single ALU", "Special registers within the CPU (PC, MAR, MDR, CIR, ACC)", "Executes one instruction at a time, in sequence", "Uses the fetch–decode–execute cycle", "Instructions and data are stored in the same memory, in the same format (the stored program concept)", "A single set of buses connects the CPU to memory, shared by instructions and data"],
+      "Because instructions and data share one set of buses, they can't be fetched at the same time. This limit is known as the von Neumann bottleneck."],
+    cpu: ["Central Processing Unit (CPU)", "Fetches, decodes and executes instructions. It contains the Control Unit, the ALU and a set of special-purpose registers (PC, MAR, MDR, CIR and ACC), and is connected to memory by the address, data and control buses."],
+    cu: ["Control Unit (CU)", "Coordinates everything the CPU does. It decodes the instruction in the CIR and sends control signals to the other components and to memory, for example telling RAM whether to read or write. It keeps the fetch–decode–execute cycle in step with the clock."],
+    pc: ["Program Counter (PC)", "Holds the address of the next instruction to be fetched. It is incremented during the fetch stage (PC++) so it points to the next instruction, unless a branch instruction loads it with a different address."],
+    mar: ["Memory Address Register (MAR)", "Holds the address of the memory location that is about to be read from or written to. The address is sent to RAM along the address bus."],
+    mdr: ["Memory Data Register (MDR)", "Holds the data or instruction that has just been read from memory, or that is about to be written to memory. Everything passing between the CPU and RAM on the data bus goes through the MDR."],
+    cir: ["Current Instruction Register (CIR)", "Holds the instruction that is currently being decoded and executed. The instruction is split into an opcode (what to do) and an operand (the data or address to do it with)."],
+    alu: ["Arithmetic and Logic Unit (ALU)", "Carries out arithmetic operations such as addition and subtraction, and logical operations such as AND, OR and comparisons."],
+    acc: ["Accumulator (ACC)", "A register that holds the data currently being worked on. The results of calculations carried out by the ALU are stored here."],
+    addr: ["Address bus", "Carries addresses from the MAR to memory. It is one-directional (CPU to memory only). The width of the address bus decides how many memory locations can be addressed."],
+    data: ["Data bus", "Carries data and instructions between the CPU and memory. It is bidirectional: data travels into the CPU when memory is read, and out of the CPU when memory is written to."],
+    ctrl: ["Control bus", "Carries control signals between the Control Unit and the other components, such as memory read and write signals, clock signals and interrupt requests. It is bidirectional."],
+    ram: ["Main memory (RAM)", "Holds the program while it runs. In the von Neumann architecture, instructions and data are stored in the same memory, in the same format (binary), and share the same buses to reach the CPU."],
+    clock: ["Clock", "Sends out a regular pulse that keeps the CPU's components in step. Each step of the cycle happens on a clock tick. Clock speed is measured in hertz: 3.2 GHz means 3.2 billion ticks a second."],
+    io: ["Input / output", "Not part of the CPU. INP takes a value from an input device into the ACC, and OUT sends the value in the ACC to an output device."]
+  };
+
+  const HLBOX = {
+    pc: [667, 265, 182, 62], mar: [667, 144, 182, 62], mdr: [667, 409, 182, 62], cir: [346, 414, 182, 62],
+    cu: [717, 552, 127, 61], alu: [341, 135, 205, 128], acc: [352, 262, 182, 62], io: [529, 626, 92, 42]
+  };
+
+  const P = {
+    pcToMar: [[758, 271], [758, 200]],
+    cuRam: [[838, 576], [1036, 522]],
+    mdrToCir: [[673, 440], [522, 440]],
+    cirToCu: [[522, 455], [590, 455], [590, 583], [723, 583]],
+    cirToMar: [[522, 437], [607, 437], [607, 181], [673, 181]],
+    cirToPc: [[522, 437], [607, 437], [607, 296], [673, 296]],
+    mdrToAcc: [[673, 440], [607, 440], [607, 293], [528, 293]],
+    accToMdr: [[528, 293], [607, 293], [607, 440], [673, 440]],
+    mdrToAlu: [[673, 440], [607, 440], [607, 222], [500, 222]],
+    accToAlu: [[400, 268], [400, 222]],
+    aluToAcc: [[443, 222], [443, 268]],
+    accToIo: [[528, 300], [575, 300], [575, 632]],
+    ioToAcc: [[575, 632], [575, 300], [528, 300]]
+  };
+
+  const opts = { base: 0, pcStep: true, clearRegs: true, storeName: "STA", binary: false, questions: true, speed: 2 };
+  const DUR = [4200, 3000, 2000, 1200, 600, 200];
+  const DWELL = [2600, 1900, 1300, 750, 300, 60];
+  const SPEED_NAMES = ["Very slow", "Slow", "Medium", "Fast", "Very fast", "Turbo"];
+
+  let mem = [];
+  let snapshot = [];
+  let cpu = null;
+  let plan = null;
+  let pos = 0;
+  let cur = -1;
+  let cycleNo = 1;
+  let halted = false;
+  let haltMsg = "";
+  let busy = false;
+  let running = null;
+  let runTimer = null;
+  let animGen = 0;
+  let clockAngle = 0;
+  let output = [];
+  let trace = [];
+  let log = null;
+  let aluText = "";
+  let aluResult = 0;
+  let inputValue = null;
+  let pendingInputCb = null;
+  let view = { hl: [], bus: null, row: null, signal: null };
+  let intro = -1;
+  let flashAddr = null;
+  let outFlash = false;
+
+  function $(id) { return document.getElementById(id); }
+  function el(name, attrs, parent) {
+    const e = document.createElementNS(SVGNS, name);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    }
+    if (parent) { parent.appendChild(e); }
+    return e;
+  }
+  function txt(parent, x, y, s, attrs) {
+    const a = attrs || {};
+    a.x = x; a.y = y;
+    const t = el("text", a, parent);
+    t.textContent = s;
+    return t;
+  }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+  /* ---------- numbers and formatting ---------- */
+  function toSigned(x) { return ((x & 255) ^ 128) - 128; }
+  function bits8(v) { let s = (v & 255).toString(2); while (s.length < 8) { s = "0" + s; } return s; }
+  function bits4(v) { let s = (v & 15).toString(2); while (s.length < 4) { s = "0" + s; } return s; }
+  function opName(op) {
+    const n = OPS[op];
+    if (n === "STO") { return opts.storeName; }
+    return n;
+  }
+  function decodeValue(v) {
+    const u = v & 255;
+    const op = u >> 4;
+    const n = u & 15;
+    const name = OPS[op] || null;
+    return { u: u, op: op, n: n, name: name, shown: name ? opName(op) : null };
+  }
+  function disasm(v) {
+    const d = decodeValue(v);
+    if (!d.name) { return String(v); }
+    return NEEDS_OPERAND[d.name] ? d.shown + " " + d.n : d.shown;
+  }
+  function wordText(w) {
+    if (!w) { return ""; }
+    if (w.kind === "empty") { return ""; }
+    if (w.kind === "ins") { return disasm(w.v); }
+    return String(w.v);
+  }
+  function wordShort(w) {
+    if (!w) { return ""; }
+    if (opts.binary) { return bits8(w.v); }
+    const s = wordText(w);
+    return s === "" ? "0" : s;
+  }
+  function addrShort(a) { return opts.binary ? bits4(a) : String(a); }
+  function copyWord(w) { return { v: w.v, kind: w.kind }; }
+  function accVal() { return cpu.acc === null ? 0 : cpu.acc; }
+  function wordVal(w) { return w ? toSigned(w.v) : 0; }
+  function lastAddr() { return 15; }
+
+  /* ---------- memory ---------- */
+  function emptyMem() {
+    const m = [];
+    for (let i = 0; i < 16; i++) { m.push({ v: 0, kind: "empty" }); }
+    return m;
+  }
+  function copyMem(m) { return m.map(copyWord); }
+  function readMem(a) {
+    const c = mem[a];
+    if (!c || c.kind === "empty") { return { v: 0, kind: "data" }; }
+    return copyWord(c);
+  }
+
+  /* ---------- assembler ---------- */
+  function isNum(s) { return /^[-+]?\d+$/.test(s); }
+  function isBin8(s) { return /^[01]{8}$/.test(s); }
+  function isMnemonic(s) { const u = s.toUpperCase(); return u === "DAT" || CODES.hasOwnProperty(u); }
+  function parseData(s) {
+    if (isBin8(s)) { return { v: toSigned(parseInt(s, 2)) }; }
+    if (!isNum(s)) { return { err: "\"" + s + "\" is not a number" }; }
+    const n = parseInt(s, 10);
+    if (n < -128 || n > 255) { return { err: n + " will not fit in 8 bits (use −128 to 127)" }; }
+    return { v: toSigned(n) };
+  }
+
+  function assemble(src) {
+    const lines = src.split(/\r?\n/);
+    const items = [];
+    const labels = {};
+    const errors = [];
+    let addr = opts.base;
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const c1 = line.indexOf("//");
+      if (c1 >= 0) { line = line.slice(0, c1); }
+      const c2 = line.indexOf(";");
+      if (c2 >= 0) { line = line.slice(0, c2); }
+      line = line.trim();
+      if (!line) { continue; }
+      const toks = line.split(/[\s,]+/);
+      let label = null;
+      if (!isMnemonic(toks[0]) && !isNum(toks[0]) && !isBin8(toks[0])) {
+        label = toks.shift();
+        if (!/^[A-Za-z_]\w*$/.test(label)) { errors.push("Line " + (i + 1) + ": \"" + label + "\" is not an instruction I know."); continue; }
+      }
+      if (toks.length === 0) { errors.push("Line " + (i + 1) + ": the label \"" + label + "\" needs an instruction after it."); continue; }
+      if (label) {
+        const key = label.toLowerCase();
+        if (labels.hasOwnProperty(key)) { errors.push("Line " + (i + 1) + ": the label \"" + label + "\" is used twice."); }
+        labels[key] = addr;
+      }
+      items.push({ line: i + 1, addr: addr, toks: toks });
+      addr++;
+    }
+    const used = addr - opts.base;
+    if (addr - 1 > lastAddr()) {
+      errors.push("The program needs " + used + " memory locations but RAM only has " + (16 - opts.base) + ".");
+    }
+    const out = emptyMem();
+    if (errors.length === 0) {
+      items.forEach(function (it) {
+        const first = it.toks[0];
+        const up = first.toUpperCase();
+        const arg = it.toks[1];
+        if (it.toks.length > 2) { errors.push("Line " + it.line + ": too many parts on this line."); return; }
+        if (up === "DAT" || isNum(first) || isBin8(first)) {
+          const valStr = up === "DAT" ? arg : first;
+          if (up !== "DAT" && arg !== undefined) { errors.push("Line " + it.line + ": a number on its own is stored as data, so nothing else can follow it."); return; }
+          if (valStr === undefined) { out[it.addr] = { v: 0, kind: "empty" }; return; }
+          const d = parseData(valStr);
+          if (d.err) { errors.push("Line " + it.line + ": " + d.err + "."); return; }
+          out[it.addr] = { v: d.v, kind: "data" };
+          return;
+        }
+        const name = up === "STA" ? "STO" : up;
+        const code = CODES[up];
+        if (NEEDS_OPERAND[name]) {
+          if (arg === undefined) { errors.push("Line " + it.line + ": " + up + " needs an operand (an address or a label)."); return; }
+          let n;
+          if (isNum(arg)) { n = parseInt(arg, 10); }
+          else if (labels.hasOwnProperty(arg.toLowerCase())) { n = labels[arg.toLowerCase()]; }
+          else { errors.push("Line " + it.line + ": I can't find a label called \"" + arg + "\"."); return; }
+          if (n < opts.base || n > 15) { errors.push("Line " + it.line + ": address " + n + " is not in RAM (addresses run from " + opts.base + " to 15)."); return; }
+          out[it.addr] = { v: (code << 4) | n, kind: "ins" };
+        } else {
+          if (arg !== undefined) { errors.push("Line " + it.line + ": " + up + " does not take an operand."); return; }
+          out[it.addr] = { v: code << 4, kind: "ins" };
+        }
+      });
+    }
+    return { mem: out, errors: errors, used: used };
+  }
+
+  function parseCell(s) {
+    s = s.trim();
+    if (s === "") { return { cell: { v: 0, kind: "empty" } }; }
+    const toks = s.split(/[\s,]+/);
+    const up = toks[0].toUpperCase();
+    if (isBin8(toks[0]) && toks.length === 1) {
+      const u = parseInt(toks[0], 2);
+      if (opts.binary && OPS[u >> 4]) { return { cell: { v: u, kind: "ins" } }; }
+      return { cell: { v: toSigned(u), kind: "data" } };
+    }
+    if (isNum(toks[0]) && toks.length === 1) {
+      const d = parseData(toks[0]);
+      if (d.err) { return { err: d.err }; }
+      return { cell: { v: d.v, kind: "data" } };
+    }
+    if (up === "DAT") {
+      if (toks.length === 1) { return { cell: { v: 0, kind: "empty" } }; }
+      const d2 = parseData(toks[1]);
+      if (d2.err) { return { err: d2.err }; }
+      return { cell: { v: d2.v, kind: "data" } };
+    }
+    if (!CODES.hasOwnProperty(up)) { return { err: "type an instruction such as LDA 5, or a number" }; }
+    const name = up === "STA" ? "STO" : up;
+    if (NEEDS_OPERAND[name]) {
+      if (toks.length < 2 || !isNum(toks[1])) { return { err: up + " needs an address, e.g. " + up + " 5" }; }
+      const n = parseInt(toks[1], 10);
+      if (n < opts.base || n > 15) { return { err: "addresses run from " + opts.base + " to 15" }; }
+      return { cell: { v: (CODES[up] << 4) | n, kind: "ins" } };
+    }
+    return { cell: { v: CODES[up] << 4, kind: "ins" } };
+  }
+
+  /* ---------- examples ---------- */
+  function slideExample() {
+    const b = opts.base;
+    return "// The program from the slides\n" +
+      "LDA " + (b + 4) + "\n" +
+      "ADD " + (b + 5) + "\n" +
+      opts.storeName + " " + (b + 6) + "\n" +
+      "HLT\n" +
+      "DAT 3\n" +
+      "DAT 5\n";
+  }
+  const EXAMPLES = [
+    { name: "Add two numbers (slides)", src: slideExample },
+    { name: "Input and double (INP)", src: function () {
+      return "// Asks for a number and outputs it doubled\n" +
+        "        INP\n" +
+        "        " + opts.storeName + " num\n" +
+        "        ADD num\n" +
+        "        OUT\n" +
+        "        HLT\n" +
+        "num     DAT\n";
+    } },
+    { name: "Forgot the HLT!", src: function () {
+      return "// No HLT, so the CPU carries on and fetches\n" +
+        "// the data as if it were an instruction.\n" +
+        "        LDA x\n" +
+        "        ADD y\n" +
+        "        " + opts.storeName + " z\n" +
+        "x       DAT 3\n" +
+        "y       DAT 5\n" +
+        "z       DAT\n";
+    } },
+    { name: "Count down (BRZ, BRA, OUT)", src: function () {
+      return "// Outputs 3, 2, 1, 0\n" +
+        "        LDA count\n" +
+        "loop    OUT\n" +
+        "        SUB one\n" +
+        "        " + opts.storeName + " count\n" +
+        "        BRZ done\n" +
+        "        BRA loop\n" +
+        "done    OUT\n" +
+        "        HLT\n" +
+        "count   DAT 3\n" +
+        "one     DAT 1\n";
+    } },
+    { name: "Bigger of two (BRP)", src: function () {
+      return "// Outputs whichever of a and b is bigger\n" +
+        "        LDA a\n" +
+        "        SUB b\n" +
+        "        BRP aBig\n" +
+        "        LDA b\n" +
+        "        OUT\n" +
+        "        HLT\n" +
+        "aBig    LDA a\n" +
+        "        OUT\n" +
+        "        HLT\n" +
+        "a       DAT 7\n" +
+        "b       DAT 4\n";
+    } },
+    { name: "Three times table (loop)", src: function () {
+      return "// Outputs 3, 6, 9, 12\n" +
+        "loop    LDA total\n" +
+        "        ADD step\n" +
+        "        " + opts.storeName + " total\n" +
+        "        OUT\n" +
+        "        LDA count\n" +
+        "        SUB one\n" +
+        "        " + opts.storeName + " count\n" +
+        "        BRZ done\n" +
+        "        BRA loop\n" +
+        "done    HLT\n" +
+        "total   DAT 0\n" +
+        "step    DAT 3\n" +
+        "count   DAT 4\n" +
+        "one     DAT 1\n";
+    } },
+    { name: "FDE 2 worksheet (INP, STA, SUB)", src: function () {
+      const b = opts.base;
+      const st = opts.storeName;
+      return "// Program from the FDE 2 worksheet\n" +
+        "INP\n" +
+        st + " " + (b + 8) + "\n" +
+        "SUB " + (b + 7) + "\n" +
+        st + " " + (b + 6) + "\n" +
+        "HLT\n" +
+        "DAT 32\n" +
+        "DAT 45\n" +
+        "DAT 19\n" +
+        "DAT 41\n";
+    } },
+    { name: "FDE 3 worksheet: exercise 3 (add two inputs)", src: function () {
+      const b = opts.base;
+      const st = opts.storeName;
+      return "// Program from FDE 3, exercise 3\n" +
+        "INP\n" +
+        st + " " + (b + 7) + "\n" +
+        "INP\n" +
+        "ADD " + (b + 7) + "\n" +
+        st + " " + (b + 8) + "\n" +
+        "HLT\n" +
+        "DAT 32\n" +
+        "DAT 12\n" +
+        "DAT 7\n";
+    } },
+    { name: "FDE 3 worksheet: exercise 4 (loop until 99)", src: function () {
+      const b = opts.base;
+      return "// Program from FDE 3, exercise 4\n" +
+        "// The worksheet uses 222, which will not fit in 8 bits,\n" +
+        "// so 99 is used instead: the loop ends when you input 99.\n" +
+        "INP\n" +
+        "SUB " + (b + 8) + "\n" +
+        "BRZ " + (b + 4) + "\n" +
+        "BRA " + b + "\n" +
+        "HLT\n" +
+        "DAT 23\n" +
+        "DAT 2\n" +
+        "DAT 18\n" +
+        "DAT 99\n";
+    } }
+  ];
+
+  /* ---------- CPU state ---------- */
+  function freshCpu() {
+    return { pc: opts.base, mar: null, mdr: null, cir: null, acc: null, decoded: null };
+  }
+  function freshLog() {
+    return { fetch: { addr: [], ctrl: [], data: [] }, all: { addr: [], ctrl: [], data: [] }, exec: { ctrl: [] }, mar: [], before: null, branch: null, out: null, pcAtStart: cpu.pc, used: {} };
+  }
+  function regsSnap() {
+    return { PC: cpu.pc, MAR: cpu.mar, MDR: cpu.mdr ? cpu.mdr.v + ":" + cpu.mdr.kind : null, CIR: cpu.cir ? cpu.cir.v + ":" + cpu.cir.kind : null, ACC: cpu.acc };
+  }
+
+  /* ---------- step builders ---------- */
+  function mv(path, label) { return { path: path, label: label }; }
+  function marRow() { return cpu.mar; }
+  function rowPath(a, toRam) {
+    const y = rowY(a) + 19;
+    if (toRam) { return [[843, 175], [1048, 175], [1048, y], [1105, y]]; }
+    return [[1150, y], [1048, y], [1048, 440], [843, 440]];
+  }
+  function logBus(group, bus, value) {
+    log.all[bus].push(value);
+    if (group === "fetch") { log.fetch[bus].push(value); }
+    if (group === "exec" && bus === "ctrl") { log.exec.ctrl.push(value); }
+  }
+
+  function addrStep(group) {
+    return {
+      group: group, label: "MAR >> address bus", hl: ["mar"], bus: "addr", row: marRow,
+      say: function () { return "The MAR sends the address " + cpu.mar + " along the address bus to RAM. Memory location " + cpu.mar + " is selected."; },
+      moves: function () { return [mv(rowPath(cpu.mar, true), addrShort(cpu.mar))]; },
+      apply: function () { logBus(group, "addr", cpu.mar); }
+    };
+  }
+  function readStep(group) {
+    return {
+      group: group, label: "CU sets mem to read", hl: ["cu"], bus: "ctrl", row: marRow, signal: "READ ENABLE",
+      say: function () { return "The Control Unit sends a read signal along the control bus, so memory is set to read mode (READ ENABLE)."; },
+      moves: function () { return [mv(P.cuRam, "READ")]; },
+      apply: function () { logBus(group, "ctrl", "read"); }
+    };
+  }
+  function toMdrStep(group) {
+    return {
+      group: group, label: "RAM >> MDR", hl: ["mdr"], bus: "data", row: marRow, signal: "READ ENABLE",
+      say: function () {
+        const w = readMem(cpu.mar);
+        return "The contents of address " + cpu.mar + " (" + wordShort(w) + ") travel along the data bus from RAM into the MDR.";
+      },
+      moves: function () { return [mv(rowPath(cpu.mar, false), wordShort(readMem(cpu.mar)))]; },
+      apply: function () { cpu.mdr = readMem(cpu.mar); logBus(group, "data", wordShort(cpu.mdr)); }
+    };
+  }
+
+  function buildFetch() {
+    const steps = [];
+    steps.push({
+      group: "fetch", label: "PC >> MAR", hl: ["pc", "mar"], bus: "addr", row: function () { return cpu.pc; },
+      before: function () {
+        if (opts.clearRegs) { cpu.mar = null; cpu.mdr = null; cpu.cir = null; }
+        cpu.decoded = null;
+        aluText = "";
+        if (cpu.pc > lastAddr() || cpu.pc < opts.base) {
+          halted = true;
+          haltMsg = "The PC holds " + cpu.pc + ", but there is no memory location " + cpu.pc + ". The program ran off the end of memory without reaching HLT.";
+          return false;
+        }
+        return true;
+      },
+      say: function () {
+        let s = "The address in the PC (" + cpu.pc + ") is copied into the MAR. The MAR is connected to the address bus, so the address goes straight out to RAM and selects memory location " + cpu.pc + ".";
+        if (!opts.pcStep) { s += " The PC is then incremented (PC++) to " + (cpu.pc + 1) + "."; }
+        return s;
+      },
+      moves: function () { return [mv([[758, 271], [758, 175]].concat(rowPath(cpu.pc, true)), addrShort(cpu.pc))]; },
+      apply: function () {
+        cpu.mar = cpu.pc;
+        log.mar.push(cpu.mar);
+        logBus("fetch", "addr", cpu.mar);
+        if (!opts.pcStep) { cpu.pc = cpu.pc + 1; }
+      }
+    });
+    if (opts.pcStep) {
+      steps.push({
+        group: "fetch", label: "PC++", hl: ["pc"], row: marRow,
+        say: function () { return "The PC is incremented by 1 (PC++), so it now holds " + (cpu.pc + 1) + ", the address of the next instruction."; },
+        moves: function () { return [mv([[758, 340], [758, 300]], "+1")]; },
+        apply: function () { cpu.pc = cpu.pc + 1; }
+      });
+    }
+    steps.push(readStep("fetch"));
+    steps.push(toMdrStep("fetch"));
+    steps.push({
+      group: "fetch", label: "MDR >> CIR", hl: ["mdr", "cir"],
+      say: function () { return "The instruction (" + wordShort(cpu.mdr) + ") is copied from the MDR into the CIR, ready to be decoded."; },
+      moves: function () { return [mv(P.mdrToCir, wordShort(cpu.mdr))]; },
+      apply: function () { cpu.cir = copyWord(cpu.mdr); }
+    });
+    return steps;
+  }
+
+  function decodeProblem(d) {
+    if (!d.name) {
+      return "The Control Unit looks up the opcode " + bits4(d.op) + " but there is no instruction with that opcode. This location probably held data, not an instruction. The CPU raises an error (a software interrupt) and the program stops.";
+    }
+    if (NEEDS_OPERAND[d.name] && d.n < opts.base) {
+      return "The operand is address " + d.n + ", but RAM starts at address " + opts.base + ". The CPU raises an error and the program stops.";
+    }
+    return null;
+  }
+
+  function buildDecode() {
+    return {
+      group: "decode", label: "decode", hl: ["cir", "cu"],
+      say: function () {
+        const d = decodeValue(cpu.cir.v);
+        const bad = decodeProblem(d);
+        if (bad) { return bad; }
+        let s = "The Control Unit decodes the instruction in the CIR. The opcode " + bits4(d.op) + " means " + d.shown + " (" + MEANING[d.name] + ")";
+        if (NEEDS_OPERAND[d.name]) { s += ", and the operand " + bits4(d.n) + " is address " + d.n; }
+        return s + ".";
+      },
+      moves: function () {
+        const d = decodeValue(cpu.cir.v);
+        return [mv(P.cirToCu, opts.binary ? bits4(d.op) : (d.shown || bits4(d.op)))];
+      },
+      apply: function () {
+        const d = decodeValue(cpu.cir.v);
+        const bad = decodeProblem(d);
+        cpu.decoded = d;
+        if (bad) { halted = true; haltMsg = bad; return; }
+        log.before = regsSnap();
+        plan = plan.concat(buildExec(d));
+      }
+    };
+  }
+
+  function buildExec(d) {
+    const n = d.n;
+    const steps = [];
+    function opToMar() {
+      return {
+        group: "exec", label: "Operand >> MAR", hl: ["cir", "mar"], bus: "addr", row: function () { return n; },
+        say: function () { return "The operand (" + n + ") is copied from the CIR into the MAR. It is the address of the data this instruction needs, so it goes straight out on the address bus and selects memory location " + n + "."; },
+        moves: function () { return [mv(P.cirToMar.concat([[843, 181], [843, 175]]).concat(rowPath(n, true).slice(1)), addrShort(n))]; },
+        apply: function () { cpu.mar = n; log.mar.push(n); logBus("exec", "addr", n); }
+      };
+    }
+    function readAll() {
+      steps.push(opToMar());
+      steps.push(readStep("exec"));
+      steps.push(toMdrStep("exec"));
+    }
+    if (d.name === "LDA") {
+      readAll();
+      steps.push({
+        group: "exec", label: "MDR >> ACC", hl: ["mdr", "acc"],
+        say: function () { return "The value in the MDR (" + wordVal(cpu.mdr) + ") is copied into the accumulator."; },
+        moves: function () { return [mv(P.mdrToAcc, opts.binary ? bits8(wordVal(cpu.mdr)) : String(wordVal(cpu.mdr)))]; },
+        apply: function () { cpu.acc = wordVal(cpu.mdr); }
+      });
+    } else if (d.name === "ADD" || d.name === "SUB") {
+      const plus = d.name === "ADD";
+      const sym = plus ? "+" : "−";
+      readAll();
+      steps.push({
+        group: "exec", label: "ALU: ACC " + sym + " MDR", hl: ["alu", "acc", "mdr"],
+        say: function () {
+          const a = accVal(); const b = wordVal(cpu.mdr);
+          const raw = plus ? a + b : a - b;
+          let s = "The ACC (" + a + ") and the MDR (" + b + ") are passed to the ALU, which works out " + a + " " + sym + " " + b + " = " + toSigned(raw) + ".";
+          if (toSigned(raw) !== raw) { s += " The true answer (" + raw + ") does not fit in 8 bits, so it overflows."; }
+          return s;
+        },
+        moves: function () {
+          return [mv(P.mdrToAlu, opts.binary ? bits8(wordVal(cpu.mdr)) : String(wordVal(cpu.mdr))), mv(P.accToAlu, opts.binary ? bits8(accVal()) : String(accVal()))];
+        },
+        apply: function () {
+          const a = accVal(); const b = wordVal(cpu.mdr);
+          const raw = plus ? a + b : a - b;
+          aluResult = toSigned(raw);
+          aluText = a + " " + sym + " " + b + " = " + aluResult + (aluResult !== raw ? " (overflow)" : "");
+        }
+      });
+      steps.push({
+        group: "exec", label: "Result >> ACC", hl: ["alu", "acc"],
+        say: function () { return "The result (" + aluResult + ") is stored in the accumulator."; },
+        moves: function () { return [mv(P.aluToAcc, opts.binary ? bits8(aluResult) : String(aluResult))]; },
+        apply: function () { cpu.acc = aluResult; }
+      });
+    } else if (d.name === "STO") {
+      steps.push(opToMar());
+      steps.push({
+        group: "exec", label: "ACC >> MDR", hl: ["acc", "mdr"],
+        say: function () { return "The value in the accumulator (" + accVal() + ") is copied into the MDR, ready to be written to memory."; },
+        moves: function () { return [mv(P.accToMdr, opts.binary ? bits8(accVal()) : String(accVal()))]; },
+        apply: function () { cpu.mdr = { v: accVal(), kind: "data" }; }
+      });
+      steps.push({
+        group: "exec", label: "CU sets mem to write", hl: ["cu"], bus: "ctrl", row: marRow, signal: "WRITE ENABLE",
+        say: function () { return "The Control Unit sends a write signal along the control bus, so memory is set to write mode (WRITE ENABLE)."; },
+        moves: function () { return [mv(P.cuRam, "WRITE")]; },
+        apply: function () { logBus("exec", "ctrl", "write"); }
+      });
+      steps.push({
+        group: "exec", label: "MDR >> RAM", hl: ["mdr"], bus: "data", row: marRow, signal: "WRITE ENABLE",
+        say: function () { return "The value in the MDR (" + wordVal(cpu.mdr) + ") travels along the data bus and is written into address " + cpu.mar + ". Whatever was there before is overwritten."; },
+        moves: function () {
+          const y = rowY(cpu.mar) + 19;
+          return [mv([[843, 440], [1048, 440], [1048, y], [1150, y]], wordShort(cpu.mdr))];
+        },
+        apply: function () {
+          mem[cpu.mar] = { v: wordVal(cpu.mdr), kind: "data" };
+          flashAddr = cpu.mar;
+          logBus("exec", "data", wordShort(cpu.mdr));
+        }
+      });
+    } else if (d.name === "BRA") {
+      steps.push({
+        group: "exec", label: "Operand >> PC", hl: ["cir", "pc"],
+        say: function () { return "The operand (" + n + ") is copied into the PC, so the next instruction will be fetched from address " + n + "."; },
+        moves: function () { return [mv(P.cirToPc, addrShort(n))]; },
+        apply: function () { cpu.pc = n; log.branch = n; }
+      });
+    } else if (d.name === "BRZ" || d.name === "BRP") {
+      const zero = d.name === "BRZ";
+      const a0 = accVal();
+      const taken = zero ? a0 === 0 : a0 >= 0;
+      const test = zero ? "zero" : "zero or positive";
+      steps.push({
+        group: "exec", label: zero ? "Is ACC = 0?" : "Is ACC ≥ 0?", hl: ["acc", "cu"],
+        say: function () { return "The Control Unit checks whether the ACC is " + test + ". The ACC holds " + a0 + ", so the answer is " + (taken ? "yes" : "no") + "."; },
+        moves: function () { return []; },
+        apply: function () {}
+      });
+      if (taken) {
+        steps.push({
+          group: "exec", label: "Yes: operand >> PC", hl: ["cir", "pc"],
+          say: function () { return "The branch is taken: the operand (" + n + ") is copied into the PC, so the next instruction comes from address " + n + "."; },
+          moves: function () { return [mv(P.cirToPc, addrShort(n))]; },
+          apply: function () { cpu.pc = n; log.branch = n; }
+        });
+      } else {
+        steps.push({
+          group: "exec", label: "No: PC unchanged", hl: ["pc"],
+          say: function () { return "The branch is not taken. The PC is left alone and still holds " + cpu.pc + ", the next instruction in order."; },
+          moves: function () { return []; },
+          apply: function () {}
+        });
+      }
+    } else if (d.name === "INP") {
+      steps.push({
+        group: "exec", label: "Input >> ACC", hl: ["io", "acc"], input: true,
+        say: function () { return "The value typed in (" + inputValue + ") is placed in the accumulator."; },
+        moves: function () { return [mv(P.ioToAcc, opts.binary ? bits8(inputValue) : String(inputValue))]; },
+        apply: function () { cpu.acc = inputValue; inputValue = null; }
+      });
+    } else if (d.name === "OUT") {
+      steps.push({
+        group: "exec", label: "ACC >> output", hl: ["acc", "io"],
+        say: function () { return "The value in the accumulator (" + accVal() + ") is sent to the output."; },
+        moves: function () {
+          const ty = 173 + Math.min(output.length, outRows() - 1) * 38 + 19;
+          return [mv([[528, 300], [575, 300], [575, 662], [575, 838], [1540, 838], [1540, ty]], opts.binary ? bits8(accVal()) : String(accVal()))];
+        },
+        apply: function () { output.push(accVal()); log.out = accVal(); outFlash = true; }
+      });
+    } else if (d.name === "HLT") {
+      steps.push({
+        group: "exec", label: "CU stops the cycle", hl: ["cu"],
+        say: function () { return "HLT: the Control Unit stops the fetch–decode–execute cycle. The program has finished."; },
+        moves: function () { return []; },
+        apply: function () { halted = true; haltMsg = "Program halted. Press Reset to run it again."; }
+      });
+    }
+    return steps;
+  }
+
+  /* ---------- running ---------- */
+  function startCycle() {
+    plan = buildFetch();
+    plan.push(buildDecode());
+    pos = 0;
+    cur = -1;
+    log = freshLog();
+    $("qwrap").hidden = true;
+  }
+
+  /* ---------- step back (undo) ---------- */
+  let history = [];
+  function takeSnap() {
+    return {
+      mem: copyMem(mem),
+      cpu: { pc: cpu.pc, mar: cpu.mar, mdr: cpu.mdr ? copyWord(cpu.mdr) : null, cir: cpu.cir ? copyWord(cpu.cir) : null, acc: cpu.acc,
+        decoded: cpu.decoded ? { u: cpu.decoded.u, op: cpu.decoded.op, n: cpu.decoded.n, name: cpu.decoded.name, shown: cpu.decoded.shown } : null },
+      plan: plan, pos: pos, cur: cur, cycleNo: cycleNo, halted: halted, haltMsg: haltMsg,
+      output: output.slice(), trace: trace.slice(), log: JSON.stringify(log),
+      aluText: aluText, aluResult: aluResult,
+      view: { hl: view.hl.slice(), bus: view.bus, row: view.row, signal: view.signal }, flashAddr: flashAddr,
+      qNum: qNum, firstUsed: firstUsed ? JSON.stringify(firstUsed) : null,
+      qHidden: $("qwrap").hidden, qHtml: $("qList").innerHTML, qStart: $("qList").start, qTitle: $("qTitle").textContent, qShow: $("qShow").textContent,
+      say: $("say").textContent, sayErr: $("say").className === "err"
+    };
+  }
+  function pushSnap(sn) {
+    history.push(sn);
+    if (history.length > 300) { history.shift(); }
+  }
+  function stepBack() {
+    if (intro >= 0) { return; }
+    if (running) { stopRun(); }
+    if (!history.length) { setSay(null, "You are at the start: there is nothing to step back to."); return; }
+    animGen++;
+    clear($("tokens"));
+    busy = false;
+    inputValue = null;
+    pendingInputCb = null;
+    showInput(false);
+    const sn = history.pop();
+    mem = copyMem(sn.mem);
+    cpu = sn.cpu;
+    plan = sn.plan; pos = sn.pos; cur = sn.cur; cycleNo = sn.cycleNo; halted = sn.halted; haltMsg = sn.haltMsg;
+    output = sn.output; trace = sn.trace; log = JSON.parse(sn.log);
+    aluText = sn.aluText; aluResult = sn.aluResult;
+    view = sn.view; flashAddr = sn.flashAddr;
+    qNum = sn.qNum; firstUsed = sn.firstUsed ? JSON.parse(sn.firstUsed) : null;
+    $("qwrap").hidden = sn.qHidden;
+    $("qList").innerHTML = sn.qHtml;
+    $("qList").start = sn.qStart;
+    $("qTitle").textContent = sn.qTitle;
+    $("qShow").textContent = sn.qShow;
+    hideInfo();
+    renderAll();
+    setSay(null, sn.say, sn.sayErr);
+  }
+
+  function doStep(cb) {
+    if (halted || busy || intro >= 0) { if (cb) { cb(); } return; }
+    const snap = takeSnap();
+    if (plan && pos >= plan.length) {
+      pushSnap(snap);
+      /* a pause between cycles: reset the list and registers, but don't fetch yet */
+      startCycle();
+      if (opts.clearRegs) { cpu.mar = null; cpu.mdr = null; cpu.cir = null; }
+      cpu.decoded = null;
+      aluText = "";
+      view = { hl: [], bus: null, row: null, signal: null };
+      flashAddr = null; outFlash = false;
+      hideInfo();
+      renderAll();
+      setSay(null, "Cycle " + (cycleNo - 1) + " is complete. Ready to start cycle " + cycleNo + ": the PC holds " + cpu.pc + ", so the next instruction will be fetched from address " + cpu.pc + ".");
+      if (cb) { cb(); }
+      return;
+    }
+    if (!plan) { startCycle(); }
+    const s = plan[pos];
+    if (s.input && inputValue === null) {
+      pendingInputCb = cb || null;
+      showInput(true);
+      setSay(null, "The CPU is waiting for input. Type a number and press Enter.");
+      renderButtons();
+      return;
+    }
+    pushSnap(snap);
+    busy = true;
+    hideInfo();
+    if (s.before && s.before() === false) {
+      busy = false;
+      view = { hl: [], bus: null, row: null, signal: null };
+      cur = -1;
+      renderAll();
+      setSay(s, haltMsg, true);
+      if (cb) { cb(); }
+      return;
+    }
+    cur = pos;
+    view = { hl: s.hl || [], bus: s.bus || null, row: s.row ? s.row() : null, signal: s.signal || null };
+    (s.hl || []).forEach(function (h) { log.used[h] = true; });
+    flashAddr = null; outFlash = false;
+    const said = s.say ? s.say() : "";
+    tickClock();
+    renderAll();
+    setSay(s, said, false);
+    const moves = s.moves ? s.moves() : [];
+    const gen = animGen;
+    animateAll(moves, function () {
+      if (gen !== animGen) { return; }
+      if (s.apply) { s.apply(); }
+      pos++;
+      if (halted || pos >= plan.length) { endCycle(); }
+      busy = false;
+      renderAll();
+      if (halted) { setSay(s, said + (s.group === "decode" ? "" : " ") + (s.group === "decode" ? "" : haltMsg), s.group === "decode"); }
+      if (cb) { cb(); }
+    });
+  }
+
+  function endCycle() {
+    if (cpu.cir) {
+      trace.push({
+        cycle: cycleNo, instr: copyWord(cpu.cir), pc: cpu.pc, mar: cpu.mar,
+        mdr: cpu.mdr ? copyWord(cpu.mdr) : null, cir: copyWord(cpu.cir), acc: cpu.acc, out: log.out
+      });
+    }
+    if (opts.questions && cpu.decoded && cpu.decoded.name && log.before) { showQuestions(); }
+    cycleNo++;
+  }
+
+  function stopRun() {
+    running = null;
+    if (runTimer) { clearTimeout(runTimer); runTimer = null; }
+    renderButtons();
+  }
+
+  function run(mode) {
+    if (halted) { return; }
+    running = mode;
+    renderButtons();
+    let startedCycle = cycleNo;
+    if (plan && pos >= plan.length) { startedCycle = cycleNo; }
+    function next() {
+      if (!running) { return; }
+      if (halted) { stopRun(); return; }
+      doStep(function () {
+        if (!running) { renderButtons(); return; }
+        if (halted) { stopRun(); return; }
+        if (!$("inbox").hidden) { return; }
+        if (mode === "cycle" && plan && pos >= plan.length && cycleNo > startedCycle) { stopRun(); return; }
+        runTimer = setTimeout(next, DWELL[opts.speed - 1]);
+      });
+    }
+    next();
+  }
+
+  function resetCpu() {
+    stopRun();
+    animGen++;
+    clear($("tokens"));
+    busy = false;
+    mem = copyMem(snapshot);
+    cpu = freshCpu();
+    plan = null; pos = 0; cur = -1;
+    qNum = 0; firstUsed = null;
+    history = [];
+    cycleNo = 1; halted = false; haltMsg = "";
+    output = []; trace = []; aluText = ""; inputValue = null; pendingInputCb = null;
+    view = { hl: [], bus: null, row: null, signal: null };
+    flashAddr = null; outFlash = false;
+    log = freshLog();
+    showInput(false);
+    $("qwrap").hidden = true;
+    renderAll();
+    setSay(null, "Ready. Press Next step (or the space bar) to start fetching the first instruction from address " + opts.base + ".");
+  }
+
+  /* ---------- animation ---------- */
+  function dur() { return DUR[opts.speed - 1]; }
+  function animateAll(moves, done) {
+    if (!moves.length) { setTimeout(done, Math.min(1200, dur() * 0.35)); return; }
+    let left = moves.length;
+    moves.forEach(function (m) {
+      animateMove(m, function () { left--; if (left === 0) { done(); } });
+    });
+  }
+  function animateMove(m, done) {
+    const gen = animGen;
+    const layer = $("tokens");
+    const g = el("g", { "class": "tok" }, layer);
+    const r = el("rect", { rx: 5, ry: 5 }, g);
+    const t = el("text", { "text-anchor": "middle", y: 7 }, g);
+    t.textContent = m.label;
+    let w = 0;
+    try { w = t.getComputedTextLength(); } catch (e) { w = m.label.length * 11; }
+    if (!w) { w = m.label.length * 11; }
+    r.setAttribute("x", -(w / 2 + 9)); r.setAttribute("y", -16);
+    r.setAttribute("width", w + 18); r.setAttribute("height", 32);
+    const pts = m.path;
+    const segs = [];
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      segs.push(L); total += L;
+    }
+    function at(dist) {
+      for (let i = 0; i < segs.length; i++) {
+        if (dist <= segs[i] || i === segs.length - 1) {
+          const f = segs[i] ? Math.min(1, dist / segs[i]) : 1;
+          return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f];
+        }
+        dist -= segs[i];
+      }
+      return pts[pts.length - 1];
+    }
+    const d = dur();
+    const t0 = performance.now();
+    function frame(now) {
+      if (gen !== animGen) { if (g.parentNode) { g.parentNode.removeChild(g); } return; }
+      const k = Math.min(1, (now - t0) / d);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const p = at(total * e);
+      g.setAttribute("transform", "translate(" + p[0].toFixed(1) + "," + p[1].toFixed(1) + ")");
+      if (k < 1) { requestAnimationFrame(frame); }
+      else {
+        setTimeout(function () {
+          if (g.parentNode) { g.parentNode.removeChild(g); }
+          if (gen === animGen) { done(); }
+        }, Math.round(dur() * 0.18));
+      }
+    }
+    g.setAttribute("transform", "translate(" + pts[0][0] + "," + pts[0][1] + ")");
+    requestAnimationFrame(frame);
+  }
+
+  function tickClock() {
+    /* the clock now runs continuously while the CPU is working: see waveFrame() */
+  }
+
+  /* ---------- rendering ---------- */
+  function rowY(a) { return 173 + (a - opts.base) * 38; }
+
+  function drawBits(parent, value, x, y, cw, ch, fs, split, width) {
+    const g = el("g", { "class": "bits" }, parent);
+    const n = width || 8;
+    const b = n === 4 ? bits4(value) : bits8(value);
+    for (let i = 0; i < n; i++) {
+      el("rect", { x: x + i * cw, y: y, width: cw, height: ch }, g);
+      txt(g, x + i * cw + cw / 2, y + ch / 2 + fs * 0.36, b.charAt(i), { "text-anchor": "middle", "font-size": fs });
+    }
+    if (split) {
+      el("line", { "class": "split", x1: x + 4 * cw, y1: y - 5, x2: x + 4 * cw, y2: y + ch + 5 }, g);
+    }
+    return g;
+  }
+
+  function drawReg(id, word, isAddr, x, y) {
+    const g = $(id);
+    clear(g);
+    if (word === null || word === undefined) { return; }
+    if (opts.binary) {
+      drawBits(g, isAddr ? word : word.v, x, y - 21, isAddr ? 20 : 12, 26, 14, false, isAddr ? 4 : 8);
+    } else {
+      txt(g, x, y, isAddr ? String(word) : wordText(word) || "0", { "font-size": 26 });
+    }
+  }
+
+  function renderRegs() {
+    drawReg("v-mar", cpu.mar, true, 742, 184);
+    drawReg("v-pc", cpu.pc, true, 742, 305);
+    drawReg("v-mdr", cpu.mdr, false, 742, 449);
+    const acc = $("v-acc");
+    clear(acc);
+    if (cpu.acc !== null) {
+      if (opts.binary) { drawBits(acc, cpu.acc, 443 - 60, 280, 15, 26, 15, false); }
+      else { txt(acc, 443, 302, String(cpu.acc), { "text-anchor": "middle", "font-size": 27 }); }
+    }
+    const cir = $("v-cir");
+    clear(cir);
+    const cb = $("cirBits");
+    clear(cb);
+    if (cpu.cir) {
+      if (opts.binary) { drawBits(cir, cpu.cir.v, 407, 432, 13, 26, 14, !!cpu.decoded); }
+      else { txt(cir, 418, 454, wordText(cpu.cir) || "0", { "font-size": 26 }); }
+      if (!opts.binary) { drawBits(cb, cpu.cir.v, 350, 483, 21.75, 27, 17, !!cpu.decoded); }
+      if (cpu.decoded) {
+        const yy = opts.binary ? 486 : 526;
+        const x0 = opts.binary ? 407 : 350;
+        const cw = opts.binary ? 13 : 21.75;
+        txt(cb, x0 + 2 * cw, yy, "opcode", { "text-anchor": "middle", "font-size": 14, "class": "redtxt" });
+        txt(cb, x0 + 6 * cw, yy, "operand", { "text-anchor": "middle", "font-size": 14, "class": "redtxt" });
+      }
+    }
+    $("aluOp").textContent = aluText;
+  }
+
+  function renderRam() {
+    const g = $("ramRows");
+    clear(g);
+    for (let a = opts.base; a <= 15; a++) {
+      const y = rowY(a);
+      const row = el("g", {}, g);
+      const ar = el("rect", { "class": "box", x: 1038, y: y, width: 130, height: 38, "data-def": "ram" }, row);
+      ar.style.cursor = "pointer";
+      const cr = el("rect", { "class": "box cell" + (flashAddr === a ? " flash" : ""), x: 1168, y: y, width: 132, height: 38, "data-addr": a }, row);
+      cr.setAttribute("aria-label", "Edit address " + a);
+      const c = mem[a];
+      if (opts.binary) {
+        drawBits(row, a, 1103 - 34, y + 7, 17, 24, 14, false, 4).style.pointerEvents = "none";
+        if (c.kind !== "empty") { drawBits(row, c.v, 1234 - 56, y + 7, 14, 24, 14, false).style.pointerEvents = "none"; }
+      } else {
+        txt(row, 1103, y + 28, String(a), { "text-anchor": "middle", "font-size": 25 }).style.pointerEvents = "none";
+        txt(row, 1234, y + 28, wordText(c), { "text-anchor": "middle", "font-size": 25 }).style.pointerEvents = "none";
+      }
+    }
+    const end = rowY(16);
+    const hl = $("rowHl");
+    if (view.row !== null && view.row >= opts.base && view.row <= 15) {
+      hl.setAttribute("y", rowY(view.row));
+      hl.setAttribute("visibility", "visible");
+    } else {
+      hl.setAttribute("visibility", "hidden");
+    }
+    const sig = $("sig");
+    sig.setAttribute("y", end + 42);
+    sig.textContent = view.signal || "";
+    renderBraces();
+    renderOut();
+  }
+
+  /* the Output column to the right of RAM: each OUT value appears below the last */
+  function outRows() { return Math.floor((rowY(16) - 173) / 38); }
+  function renderOut() {
+    const g = $("outCol");
+    clear(g);
+    const hasOut = output.length > 0 || mem.some(function (c) { return c.kind === "ins" && decodeValue(c.v).name === "OUT"; });
+    $("svg").setAttribute("viewBox", hasOut ? "0 0 1600 850" : "0 0 1480 850");
+    if (!hasOut) { return; }
+    const x = 1490;
+    const w = 100;
+    const bottom = rowY(16);
+    el("rect", { "class": "box", x: x, y: 130, width: w, height: bottom - 130 }, g);
+    el("line", { "class": "wire", x1: x, y1: 173, x2: x + w, y2: 173 }, g);
+    txt(g, x + w / 2, 162, "Output", { "text-anchor": "middle", "font-size": 25 });
+    const rows = outRows();
+    const start = Math.max(0, output.length - rows);
+    for (let i = start; i < output.length; i++) {
+      const y = 173 + (i - start) * 38;
+      el("line", { x1: x, y1: y + 38, x2: x + w, y2: y + 38, style: "stroke: var(--line); stroke-width: 1" }, g);
+      const isNew = outFlash && i === output.length - 1;
+      txt(g, x + w / 2, y + 27, opts.binary ? bits8(output[i]) : String(output[i]),
+        { "text-anchor": "middle", "font-size": opts.binary ? 17 : 25, "class": isNew ? "redtxt" : "" });
+    }
+    el("polyline", { "class": "wire", points: "575,662 575,838 " + (x + w / 2) + ",838 " + (x + w / 2) + "," + bottom, "stroke-dasharray": "5 4" }, g);
+  }
+
+  function bracePath(x, y1, y2) {
+    const w = 13;
+    const m = (y1 + y2) / 2;
+    const r = Math.min(10, (y2 - y1) / 4);
+    return "M" + x + " " + y1 + " Q" + (x + w) + " " + y1 + " " + (x + w) + " " + (y1 + r) +
+      " L" + (x + w) + " " + (m - r) + " Q" + (x + w) + " " + m + " " + (x + 2 * w) + " " + m +
+      " Q" + (x + w) + " " + m + " " + (x + w) + " " + (m + r) +
+      " L" + (x + w) + " " + (y2 - r) + " Q" + (x + w) + " " + y2 + " " + x + " " + y2;
+  }
+
+  function renderBraces() {
+    const g = $("braces");
+    clear(g);
+    let a = opts.base;
+    while (a <= 15) {
+      const k = mem[a].kind;
+      if (k === "empty") { a++; continue; }
+      let b = a;
+      while (b + 1 <= 15 && mem[b + 1].kind === k) { b++; }
+      const y1 = rowY(a) + 4;
+      const y2 = rowY(b) + 34;
+      el("path", { d: bracePath(1312, y1, y2), style: "fill: none; stroke: var(--ink); stroke-width: 4; stroke-linecap: round" }, g);
+      txt(g, 1346, (y1 + y2) / 2 + 7, k === "ins" ? "instructions" : "data", { "font-size": k === "ins" ? 19 : 23 });
+      a = b + 1;
+    }
+  }
+
+  function renderHighlights() {
+    const g = $("hls");
+    clear(g);
+    view.hl.forEach(function (id) {
+      const b = HLBOX[id];
+      if (b) { el("rect", { "class": "hl", x: b[0], y: b[1], width: b[2], height: b[3] }, g); }
+    });
+    $("bus-addr").setAttribute("class", "bus" + (view.bus === "addr" ? " on" : ""));
+    $("bus-data").setAttribute("class", "bus" + (view.bus === "data" ? " on" : ""));
+    const w = $("w-ctrl");
+    w.setAttribute("class", "wire" + (view.bus === "ctrl" || view.signal ? " on" : ""));
+    w.setAttribute("marker-end", view.bus === "ctrl" || view.signal ? "url(#ahr)" : "url(#ah)");
+    w.setAttribute("marker-start", view.bus === "ctrl" || view.signal ? "url(#ahr)" : "url(#ah)");
+  }
+
+  function tickAt(g, x, y) {
+    el("path", { "class": "tick", d: "M" + x + " " + (y - 8) + " l7 9 l15 -22" }, g);
+  }
+  function boxAround(g, t, padX, padY) {
+    let bb;
+    try { bb = t.getBBox(); } catch (e) { return; }
+    el("rect", { "class": "hl", x: Math.max(1, bb.x - padX), y: bb.y - padY, width: bb.width + padX * 2, height: bb.height + padY * 2 }, g);
+  }
+
+  function renderList() {
+    const g = $("list");
+    clear(g);
+    const fetchSteps = plan ? plan.filter(function (s) { return s.group === "fetch"; }) : buildFetch();
+    const execSteps = plan ? plan.filter(function (s) { return s.group === "exec"; }) : [];
+    const curStep = plan && cur >= 0 ? plan[cur] : null;
+    const doneUpTo = plan ? pos : 0;
+    function isDone(s) { return plan ? plan.indexOf(s) >= 0 && plan.indexOf(s) < doneUpTo : false; }
+    const hlLayer = el("g", {}, null);
+    let y = 145;
+    txt(g, 4, y, "Fetch", { "font-size": 25, "font-weight": 700 });
+    y += 37;
+    fetchSteps.forEach(function (s) {
+      const t = txt(g, 4, y, s.label, { "font-size": 24 });
+      if (curStep === s) { boxAround(hlLayer, t, 3, 3); }
+      if (isDone(s)) {
+        let w = 0; try { w = t.getComputedTextLength(); } catch (e) { w = 150; }
+        tickAt(g, 4 + w + 12, y);
+      }
+      y += 36;
+    });
+    y += 22;
+    const decodeStep = plan ? plan.filter(function (s) { return s.group === "decode"; })[0] : null;
+    const dg = el("g", {}, g);
+    txt(dg, 4, y, "Decode", { "font-size": 25, "font-weight": 700 });
+    txt(dg, 4, y + 36, "INSTRUCTION looked up", { "font-size": 24 });
+    txt(dg, 4, y + 72, "and prepared for", { "font-size": 24 });
+    const lastD = txt(dg, 4, y + 108, "execution", { "font-size": 24 });
+    if (decodeStep && curStep === decodeStep) { boxAround(hlLayer, dg, 3, 4); }
+    if (decodeStep && isDone(decodeStep)) {
+      let w2 = 0; try { w2 = lastD.getComputedTextLength(); } catch (e) { w2 = 100; }
+      tickAt(g, 4 + w2 + 16, y + 108);
+    }
+    y += 108 + 56;
+    txt(g, 4, y, "Execute", { "font-size": 25, "font-weight": 700 });
+    y += 36;
+    let perf = "INSTRUCTION performed";
+    if (cpu.decoded && cpu.decoded.name) { perf = wordText(cpu.cir) + " performed"; }
+    const pt = txt(g, 4, y, perf, { "font-size": 24 });
+    if (execSteps.length && execSteps.every(isDone)) {
+      let w3 = 0; try { w3 = pt.getComputedTextLength(); } catch (e) { w3 = 200; }
+      tickAt(g, 4 + w3 + 12, y);
+    }
+    y += 32;
+    execSteps.forEach(function (s) {
+      const t = txt(g, 20, y, s.label, { "font-size": 21 });
+      if (curStep === s) { boxAround(hlLayer, t, 4, 3); }
+      if (isDone(s)) {
+        let w = 0; try { w = t.getComputedTextLength(); } catch (e) { w = 150; }
+        tickAt(g, 20 + w + 10, y);
+      }
+      y += 30;
+    });
+    g.appendChild(hlLayer);
+  }
+
+  function fmtCellForTable(w) {
+    if (!w) { return ""; }
+    return opts.binary ? bits8(w.v) : (wordText(w) || "0");
+  }
+  function fmtAddr(n) {
+    if (n === null || n === undefined) { return ""; }
+    return opts.binary ? bits4(n) : String(n);
+  }
+  function fmtNum(n) {
+    if (n === null || n === undefined) { return ""; }
+    return opts.binary ? bits8(n) : String(n);
+  }
+
+  function renderTrace() {
+    const tb = $("traceBody");
+    clear(tb);
+    if (!trace.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 8; td.className = "empty";
+      td.textContent = "A row is added each time a fetch–decode–execute cycle finishes.";
+      tr.appendChild(td); tb.appendChild(tr);
+      return;
+    }
+    trace.forEach(function (r) {
+      const tr = document.createElement("tr");
+      const cells = [String(r.cycle), wordText(r.instr), fmtAddr(r.pc), fmtAddr(r.mar), fmtCellForTable(r.mdr), fmtCellForTable(r.cir), fmtNum(r.acc), r.out === null || r.out === undefined ? "" : String(r.out)];
+      cells.forEach(function (c, i) {
+        const td = document.createElement("td");
+        td.textContent = c;
+        if (opts.binary && i >= 2 && i <= 6) { td.className = "mono"; }
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    const box = tb.parentNode.parentNode;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderOutput() {
+    const o = $("outBox");
+    if (!output.length) { o.innerHTML = "<span class=\"empty\">Nothing output yet</span>"; return; }
+    o.textContent = output.join("   ");
+  }
+
+  function renderButtons() {
+    const introOn = intro >= 0;
+    $("runCtrls").hidden = introOn;
+    $("introCtrls").hidden = !introOn;
+    const waiting = !$("inbox").hidden;
+    $("stepBtn").disabled = halted || !!running || waiting;
+    $("cycleBtn").disabled = halted || !!running || waiting;
+    $("runBtn").disabled = halted && !running;
+    $("runBtn").textContent = running ? "Pause" : "Run";
+    $("backBtn").disabled = history.length === 0;
+    $("loadBtn").disabled = !!running;
+  }
+
+  function renderPhase() {
+    const ph = $("phase");
+    let stage = "";
+    if (intro >= 0) { ph.innerHTML = "Building the CPU"; return; }
+    if (plan && cur >= 0) {
+      const g = plan[cur].group;
+      stage = g === "fetch" ? "Fetch" : g === "decode" ? "Decode" : "Execute";
+    }
+    const cyc = plan ? (pos >= plan.length ? cycleNo - 1 : cycleNo) : cycleNo;
+    ph.innerHTML = "Cycle " + cyc + (stage ? " · <b>" + stage + "</b>" : "") + (halted ? " · <b>Stopped</b>" : "");
+  }
+
+  function renderAll() {
+    renderRegs();
+    renderRam();
+    renderHighlights();
+    renderList();
+    renderTrace();
+    renderOutput();
+    renderButtons();
+    renderPhase();
+  }
+
+  function setSay(step, s, isErr) {
+    const p = $("say");
+    p.textContent = s;
+    p.className = isErr ? "err" : "";
+    renderPhase();
+  }
+
+  /* ---------- input ---------- */
+  function showInput(on) {
+    $("inbox").hidden = !on;
+    $("inMsg").textContent = "";
+    if (on) { $("inVal").value = ""; setTimeout(function () { $("inVal").focus(); }, 30); }
+    renderButtons();
+  }
+  function submitInput() {
+    const v = $("inVal").value.trim();
+    if (!/^[-+]?\d+$/.test(v)) { $("inMsg").textContent = "Type a whole number."; return; }
+    const n = parseInt(v, 10);
+    if (n < -128 || n > 127) { $("inMsg").textContent = "It has to fit in 8 bits: −128 to 127."; return; }
+    inputValue = n;
+    showInput(false);
+    const cb = pendingInputCb;
+    pendingInputCb = null;
+    if (running) {
+      doStep(function () {
+        if (cb) { cb(); }
+      });
+    } else {
+      doStep(cb);
+    }
+  }
+
+  /* ---------- questions ---------- */
+  /* Questions follow the FDE 1 worksheet: cycle 1 = Q1-3, cycle 2 = Q4-6, cycle 3 = Q7-9,
+     and Q10-11 about the whole program once it halts. */
+  let qNum = 0;
+  let firstUsed = null;
+  const PART_NAMES = { cu: "Control Unit", alu: "ALU", acc: "ACC", pc: "PC", mar: "MAR", mdr: "MDR", cir: "CIR", io: "I/O" };
+  function showQuestions() {
+    const regsAfter = regsSnap();
+    const changed = [];
+    const val = { PC: cpu.pc, MAR: cpu.mar, MDR: wordText(cpu.mdr) || "0", CIR: wordText(cpu.cir), ACC: cpu.acc };
+    ["PC", "MAR", "MDR", "CIR", "ACC"].forEach(function (k) {
+      if (log.before && log.before[k] !== regsAfter[k]) { changed.push(k + " (now " + val[k] + ")"); }
+    });
+    const fAddr = log.fetch.addr.length ? log.fetch.addr[0] : "?";
+    const fData = log.fetch.data.length ? log.fetch.data[0] : "?";
+    const dataParts = log.all.data.map(function (d, i) {
+      return i === 0 ? d + " (the instruction, during the fetch stage)" : d + " (data, during the execute stage)";
+    });
+    const nextIns = cpu.pc <= 15 && mem[cpu.pc] && mem[cpu.pc].kind === "ins" ? " (" + wordText(mem[cpu.pc]) + " at address " + cpu.pc + ")" : "";
+    const newParts = [];
+    if (firstUsed) {
+      Object.keys(log.used).forEach(function (k) { if (!firstUsed[k] && PART_NAMES[k]) { newParts.push(PART_NAMES[k]); } });
+    }
+    let partAns = newParts.length ? newParts.join(", ") : "None: every component used in this cycle was also used in the first cycle.";
+    if (newParts.indexOf("ALU") >= 0 && aluText) { partAns = partAns.replace("ALU", "The ALU, which works out " + aluText.replace(" (overflow)", "")); }
+    const wroteTo = log.exec.ctrl.indexOf("write") >= 0;
+    const bank = {
+      A: { q: "What data/signals will be sent over the 3 buses during the FETCH stage?", m: 3,
+        a: "Address bus: " + fAddr + " (the address of the instruction, from the MAR). Control bus: a memory read signal (READ ENABLE). Data bus: the instruction " + fData + "." },
+      B: { q: "During this whole FDE cycle what values will the MAR contain?", m: 2,
+        a: log.mar.length > 1 ? log.mar[0] + " during the fetch stage, then " + log.mar.slice(1).join(", then ") + " during the execute stage." : log.mar[0] + " only. This instruction did not need to use memory again during execute." },
+      C: { q: "Which registers will have their contents changed during the EXECUTE stage?", m: 2,
+        a: changed.length ? changed.join(", ") : "None of them. This instruction did not change any of the registers." },
+      D: { q: "During this entire FDE cycle what was transmitted over the data bus?", m: 2,
+        a: dataParts.join(", then ") },
+      E: { q: "Why does the PC now hold " + cpu.pc + "?", m: 1,
+        a: log.branch !== null ? "The branch instruction copied its operand (" + log.branch + ") into the PC, so the next instruction is fetched from there." : "It was incremented (PC++) during the fetch stage, so that it holds the address of the next instruction" + nextIns + "." },
+      G: { q: "Which processor component was used in this cycle that was not used in the first cycle?", m: 1, a: partAns },
+      H: { q: "State the content of registers PC, MAR, CIR, MDR and ACC once the EXECUTE stage is complete.", m: 5,
+        a: "PC = " + cpu.pc + ", MAR = " + (cpu.mar === null ? "empty" : cpu.mar) + ", CIR = " + wordText(cpu.cir) + ", MDR = " + (cpu.mdr ? wordText(cpu.mdr) || "0" : "empty") + ", ACC = " + (cpu.acc === null ? "empty" : cpu.acc) },
+      F: { q: "Was memory read from or written to during this EXECUTE stage? How can you tell?", m: 2,
+        a: wroteTo ? "Written to: the CU sent a write signal (WRITE ENABLE) on the control bus, and the MDR's contents (" + (wordText(cpu.mdr) || "0") + ") went along the data bus into address " + cpu.mar + "." :
+          log.exec.ctrl.indexOf("read") >= 0 ? "Read from: the CU sent a read signal (READ ENABLE) on the control bus, and data came back along the data bus into the MDR." :
+          "Neither: this instruction did not use memory during the execute stage." }
+    };
+    if (cycleNo === 1) { firstUsed = {}; Object.keys(log.used).forEach(function (k) { firstUsed[k] = true; }); }
+    let pick;
+    const finished = halted && cpu.decoded && cpu.decoded.name === "HLT";
+    if (finished) {
+      const ins = [];
+      for (let a = opts.base; a <= 15; a++) { if (snapshot[a] && snapshot[a].kind === "ins") { ins.push(disasm(snapshot[a].v).split(" ")[0]); } }
+      const altered = [];
+      for (let a2 = opts.base; a2 <= 15; a2++) {
+        const before = snapshot[a2];
+        const after = mem[a2];
+        if (before.kind !== after.kind || before.v !== after.v) {
+          altered.push("address " + a2 + (before.kind === "empty" ? " (it was empty and now holds " : " (it changed from " + wordText(before) + " to ") + wordText(after) + ")");
+        }
+      }
+      bank.P = { q: "How many instructions are there in the program?", m: 1, a: ins.length + " (" + ins.join(", ") + ")" };
+      bank.Q = { q: "Which memory location(s) alter their contents as a result of the program running?", m: 1,
+        a: altered.length ? altered.join("; ").replace(/^a/, "A") : "None: the program did not change anything in memory." };
+      pick = ["P", "Q"];
+    } else if (cycleNo === 1) { pick = ["A", "B", "C"]; }
+    else if (cycleNo === 2) { pick = ["E", "D", "G"]; }
+    else if (cycleNo === 3) { pick = ["A", "H", "F"]; }
+    else {
+      const all = ["A", "B", "C", "D", "E", "F", "H"];
+      const o = (cycleNo * 3) % all.length;
+      pick = [all[o], all[(o + 2) % all.length], all[(o + 4) % all.length]];
+    }
+    const first = qNum + 1;
+    const ol = $("qList");
+    clear(ol);
+    ol.start = first;
+    pick.forEach(function (k) {
+      const li = document.createElement("li");
+      const q = document.createElement("div");
+      q.textContent = bank[k].q;
+      const mk = document.createElement("span");
+      mk.className = "mk";
+      mk.textContent = "[" + bank[k].m + "]";
+      q.appendChild(mk);
+      const a = document.createElement("div");
+      a.className = "ans";
+      a.hidden = true;
+      a.textContent = bank[k].a;
+      li.appendChild(q); li.appendChild(a);
+      ol.appendChild(li);
+    });
+    qNum += pick.length;
+    $("qTitle").textContent = "Questions " + first + "–" + qNum + (finished ? " · the whole program" : " · cycle " + cycleNo + " (" + wordText(cpu.cir) + ")");
+    $("qShow").textContent = "Show answers";
+    $("qwrap").hidden = false;
+  }
+
+  /* ---------- info / definitions ---------- */
+  function showInfo(key) {
+    const d = DEF[key];
+    if (!d) { return; }
+    $("infoTitle").textContent = d[0];
+    $("infoText").textContent = d[1];
+    const ul = $("infoList");
+    clear(ul);
+    ul.hidden = !d[2];
+    if (d[2]) {
+      d[2].forEach(function (item) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        ul.appendChild(li);
+      });
+    }
+    $("infoNote").hidden = !d[3];
+    $("infoNote").textContent = d[3] || "";
+    $("info").hidden = false;
+  }
+  function hideInfo() { $("info").hidden = true; }
+
+  /* ---------- build-up (intro) mode ---------- */
+  const PARTS = ["p-list", "p-alu", "p-cu", "p-mar", "p-mdr", "p-pc", "p-cir", "p-io", "p-clock", "p-out"];
+  const INTRO = [
+    { show: [], hl: [], title: "The von Neumann model", text: "A computer has a CPU and a memory unit (RAM). The program is stored in RAM: the instructions and the data they work on sit side by side in the same memory, in the same format. The CPU fetches the instructions one at a time and carries them out." },
+    { show: ["p-cu"], hl: ["cu"], bus: "ctrl", def: ["cu", "ctrl"] },
+    { show: ["p-mar"], hl: ["mar"], bus: "addr", def: ["mar", "addr"] },
+    { show: ["p-mdr"], hl: ["mdr"], bus: "data", def: ["mdr", "data"] },
+    { show: [], hl: [], title: "Loading and storing", text: "Together, the Control Unit, the MAR and the MDR give the CPU a way to load and store. The MAR says where in memory (it sends the address along the address bus), the MDR holds what is being moved (it travels along the data bus), and the Control Unit says whether memory should read or write (using the control bus). Every instruction and every piece of data goes in and out of the CPU this way." },
+    { show: ["p-alu"], hl: ["alu", "acc"], def: ["alu", "acc"] },
+    { show: ["p-pc"], hl: ["pc"], def: ["pc"] },
+    { show: ["p-cir"], hl: ["cir"], def: ["cir"] },
+    { show: ["p-list", "p-clock", "p-io", "p-out"], hl: [], title: "The fetch–decode–execute cycle", text: "Every instruction goes through the same cycle, driven by the clock. Fetch: PC >> MAR (the address goes out on the address bus), PC++, the CU sets memory to read, RAM >> MDR along the data bus, MDR >> CIR. Decode: the CU works out what the instruction means. Execute: the instruction is carried out. Press Finish, then Next step to watch it happen." }
+  ];
+  function renderIntro() {
+    const st = INTRO[intro];
+    const shown = {};
+    for (let i = 0; i <= intro; i++) { INTRO[i].show.forEach(function (p) { shown[p] = true; }); }
+    PARTS.forEach(function (p) { $(p).classList.toggle("ghost", !shown[p]); });
+    view = { hl: st.hl, bus: st.bus || null, row: null, signal: null };
+    renderHighlights();
+    $("rowHl").setAttribute("visibility", "hidden");
+    $("sig").textContent = "";
+    let title = st.title;
+    let text = st.text;
+    if (st.def) {
+      title = st.def.map(function (k) { return DEF[k][0]; }).join(" and ");
+      text = st.def.map(function (k) { return DEF[k][1]; }).join(" ");
+    }
+    $("phase").innerHTML = "Building the CPU · <b>" + title + "</b>";
+    $("say").textContent = text;
+    $("say").className = "";
+    $("introCount").textContent = (intro + 1) + " of " + INTRO.length;
+    $("introBack").disabled = intro === 0;
+    $("introNext").disabled = intro === INTRO.length - 1;
+  }
+  function startIntro() {
+    resetCpu();
+    hideInfo();
+    intro = 0;
+    renderButtons();
+    renderIntro();
+  }
+  function endIntro() {
+    intro = -1;
+    PARTS.forEach(function (p) { $(p).classList.remove("ghost"); });
+    resetCpu();
+  }
+
+  /* ---------- RAM cell editing ---------- */
+  let editing = null;
+  function openEditor(addr, rectEl) {
+    if (running || busy || intro >= 0) { return; }
+    closeEditor(false);
+    const stage = $("stage");
+    const sr = stage.getBoundingClientRect();
+    const r = rectEl.getBoundingClientRect();
+    const inp = document.createElement("input");
+    inp.id = "cellEdit";
+    inp.type = "text";
+    inp.setAttribute("aria-label", "Contents of address " + addr);
+    const c = mem[addr];
+    inp.value = c.kind === "empty" ? "" : (opts.binary ? bits8(c.v) : wordText(c));
+    inp.style.left = (r.left - sr.left + stage.scrollLeft - 2) + "px";
+    inp.style.top = (r.top - sr.top + stage.scrollTop - 2) + "px";
+    inp.style.width = (r.width + 4) + "px";
+    inp.style.height = (r.height + 4) + "px";
+    inp.style.fontSize = Math.max(13, r.height * 0.55) + "px";
+    stage.appendChild(inp);
+    editing = { addr: addr, input: inp };
+    inp.focus();
+    inp.select();
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); closeEditor(true); }
+      else if (e.key === "Escape") { e.preventDefault(); closeEditor(false); }
+    });
+    inp.addEventListener("blur", function () { closeEditor(true); });
+  }
+  /* rebuild the program text from RAM, one line per address */
+  function ramToSource() {
+    let last = -1;
+    for (let a = opts.base; a <= 15; a++) { if (snapshot[a] && snapshot[a].kind !== "empty") { last = a; } }
+    const lines = [];
+    for (let a2 = opts.base; a2 <= last; a2++) {
+      const c = snapshot[a2];
+      if (c.kind === "ins") { lines.push(disasm(c.v)); }
+      else if (c.kind === "data") { lines.push("DAT " + c.v); }
+      else { lines.push("DAT"); }
+    }
+    return lines.length ? lines.join("\n") + "\n" : "";
+  }
+  function closeEditor(save) {
+    if (!editing) { return; }
+    const ed = editing;
+    editing = null;
+    if (save) {
+      const res = parseCell(ed.input.value);
+      if (res.err) {
+        setSay(null, "Address " + ed.addr + " was not changed: " + res.err + ".", true);
+      } else {
+        mem[ed.addr] = res.cell;
+        snapshot[ed.addr] = copyWord(res.cell);
+        $("src").value = ramToSource();
+        $("asmMsg").textContent = "Address " + ed.addr + " changed. The program box has been rewritten to match RAM.";
+        $("asmMsg").className = "msg";
+      }
+    }
+    if (ed.input.parentNode) { ed.input.parentNode.removeChild(ed.input); }
+    renderRam();
+  }
+
+  /* ---------- loading programs ---------- */
+  function loadProgram() {
+    const res = assemble($("src").value);
+    const m = $("asmMsg");
+    if (res.errors.length) {
+      m.textContent = res.errors.slice(0, 3).join(" ");
+      m.className = "msg bad";
+      return false;
+    }
+    snapshot = copyMem(res.mem);
+    m.textContent = "Loaded into RAM: " + res.used + " memory location" + (res.used === 1 ? "" : "s") + " used, starting at address " + opts.base + ".";
+    m.className = "msg";
+    resetCpu();
+    return true;
+  }
+  function fillExamples() {
+    const sel = $("examples");
+    clear(sel);
+    EXAMPLES.forEach(function (ex, i) {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = ex.name;
+      sel.appendChild(o);
+    });
+  }
+  function fillIsa() {
+    const tb = $("isaBody");
+    clear(tb);
+    ISA_ORDER.forEach(function (n) {
+      const tr = document.createElement("tr");
+      const shown = n === "STO" ? opts.storeName + (opts.storeName === "STO" ? " (or STA)" : " (or STO)") : n;
+      const cells = [shown + (NEEDS_OPERAND[n] ? " x" : ""), bits4(CODES[n]), MEANING[n].charAt(0).toUpperCase() + MEANING[n].slice(1) + (NEEDS_OPERAND[n] && n.charAt(0) !== "B" ? " (address x)" : NEEDS_OPERAND[n] ? " (to address x)" : "")];
+      cells.forEach(function (c) {
+        const td = document.createElement("td");
+        td.textContent = c;
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+  }
+
+  /* ---------- events ---------- */
+  function setMode(bin) {
+    opts.binary = bin;
+    $("modeAsm").setAttribute("aria-pressed", bin ? "false" : "true");
+    $("modeBin").setAttribute("aria-pressed", bin ? "true" : "false");
+    closeEditor(false);
+    renderAll();
+    if (intro >= 0) { renderIntro(); }
+  }
+
+  function wire() {
+    $("stepBtn").addEventListener("click", function () { doStep(null); });
+    $("backBtn").addEventListener("click", stepBack);
+    $("cycleBtn").addEventListener("click", function () { run("cycle"); });
+    $("runBtn").addEventListener("click", function () {
+      if (running) { stopRun(); } else { run("run"); }
+    });
+    $("resetBtn").addEventListener("click", function () { resetCpu(); });
+    $("speed").addEventListener("input", function () { opts.speed = parseInt(this.value, 10); $("speedName").textContent = SPEED_NAMES[opts.speed - 1]; });
+    $("modeAsm").addEventListener("click", function () { setMode(false); });
+    $("modeBin").addEventListener("click", function () { setMode(true); });
+    $("qBtn").addEventListener("click", function () {
+      opts.questions = !opts.questions;
+      this.textContent = "Questions: " + (opts.questions ? "on" : "off");
+      this.setAttribute("aria-pressed", opts.questions ? "true" : "false");
+      this.classList.toggle("on", opts.questions);
+      if (!opts.questions) { $("qwrap").hidden = true; }
+    });
+    $("qShow").addEventListener("click", function () {
+      const answers = document.querySelectorAll("#qList .ans");
+      const show = this.textContent === "Show answers";
+      Array.prototype.forEach.call(answers, function (a) { a.hidden = !show; });
+      this.textContent = show ? "Hide answers" : "Show answers";
+    });
+    $("themeBtn").addEventListener("click", function () {
+      const dark = document.documentElement.getAttribute("data-theme") !== "dark";
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      this.textContent = dark ? "Light mode" : "Dark mode";
+    });
+    $("optBase").addEventListener("change", function () {
+      const ex = EXAMPLES[parseInt($("examples").value, 10)];
+      const unchanged = ex && $("src").value === ex.src();
+      opts.base = parseInt(this.value, 10);
+      if (unchanged) { $("src").value = ex.src(); }
+      loadProgram();
+    });
+    $("optSto").addEventListener("change", function () {
+      opts.storeName = this.value;
+      fillIsa();
+      renderAll();
+    });
+    $("optPc").addEventListener("change", function () { opts.pcStep = this.checked; if (!plan || pos === 0 || pos >= plan.length) { plan = null; renderList(); } });
+    $("optClear").addEventListener("change", function () { opts.clearRegs = this.checked; });
+    $("examples").addEventListener("change", function () {
+      const ex = EXAMPLES[parseInt(this.value, 10)];
+      $("src").value = ex.src();
+      loadProgram();
+    });
+    $("loadBtn").addEventListener("click", function () { loadProgram(); });
+    $("clearBtn").addEventListener("click", function () {
+      snapshot = emptyMem();
+      resetCpu();
+      $("asmMsg").textContent = "RAM emptied. Click a cell in the diagram to type an instruction, or load a program.";
+      $("asmMsg").className = "msg";
+    });
+    $("inGo").addEventListener("click", submitInput);
+    $("inVal").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); submitInput(); } });
+    $("infoX").addEventListener("click", hideInfo);
+    $("introBtn").addEventListener("click", startIntro);
+    $("introNext").addEventListener("click", function () { if (intro < INTRO.length - 1) { intro++; renderIntro(); } });
+    $("introBack").addEventListener("click", function () { if (intro > 0) { intro--; renderIntro(); } });
+    $("introExit").addEventListener("click", endIntro);
+
+    $("svg").addEventListener("click", function (e) {
+      let t = e.target;
+      if (t.classList && t.classList.contains("cell")) {
+        openEditor(parseInt(t.getAttribute("data-addr"), 10), t);
+        return;
+      }
+      if (intro >= 0) { return; }
+      while (t && t !== this) {
+        if (t.getAttribute && t.getAttribute("data-def")) { showInfo(t.getAttribute("data-def")); return; }
+        t = t.parentNode;
+      }
+    });
+
+    document.addEventListener("keydown", function (e) {
+      const k = e.key;
+      const blank = $("blankOut");
+      /* any remote button brings the screen back from black */
+      if (!blank.hidden) {
+        if (k === "PageDown" || k === "PageUp" || k === "ArrowRight" || k === "ArrowLeft" || k === " " || k === "b" || k === "B" || k === "." || k === "Escape") {
+          e.preventDefault();
+          blank.hidden = true;
+        }
+        return;
+      }
+      if (k === "F5") {
+        e.preventDefault();
+        if (!document.body.classList.contains("mg-open")) { setBoard(!document.body.classList.contains("board")); }
+        return;
+      }
+      if (document.body.classList.contains("mg-open")) { return; }
+      const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || tag === "summary") { return; }
+      if ((k === "b" || k === "B" || k === ".") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        blank.hidden = false;
+        return;
+      }
+      const remote = k === "PageDown" || k === "PageUp";
+      /* Space and arrows on a focused button keep their normal behaviour; the remote's keys always work */
+      if (tag === "button" && !remote) { return; }
+      if (k === "PageDown" || k === " " || k === "ArrowRight") {
+        e.preventDefault();
+        if (intro >= 0) { if (intro < INTRO.length - 1) { intro++; renderIntro(); } return; }
+        if (!running && $("inbox").hidden) { doStep(null); }
+      } else if (k === "ArrowLeft" || k === "PageUp") {
+        e.preventDefault();
+        if (intro >= 0) { if (intro > 0) { intro--; renderIntro(); } return; }
+        stepBack();
+      }
+    });
+
+    document.addEventListener("click", function (e) {
+      const box = $("optsBox");
+      if (box.open && !box.contains(e.target)) { box.open = false; }
+    });
+  }
+
+  let waveOffset = 0;
+  let waveLast = 0;
+  const WAVE_PERIOD = 40;
+  function buildWave() {
+    const x0 = 862 - 2 * WAVE_PERIOD;
+    const x1 = 862 + 166 + 3 * WAVE_PERIOD;
+    let d = "M" + x0 + " 676";
+    for (let x = x0; x < x1; x += WAVE_PERIOD) {
+      d += " L" + x + " 650 L" + (x + WAVE_PERIOD / 2) + " 650 L" + (x + WAVE_PERIOD / 2) + " 676 L" + (x + WAVE_PERIOD) + " 676";
+    }
+    $("pulse").setAttribute("d", d);
+  }
+  function waveFrame(now) {
+    if (waveLast && (busy || running)) {
+      const dt = Math.min(100, now - waveLast);
+      const pxPerMs = WAVE_PERIOD / (dur() * 0.6);
+      waveOffset = (waveOffset + dt * pxPerMs) % WAVE_PERIOD;
+      clockAngle = (clockAngle + dt * pxPerMs * 30 / WAVE_PERIOD) % 360;
+      $("pulse").setAttribute("transform", "translate(" + (-waveOffset).toFixed(2) + ",0)");
+      $("clockHand").setAttribute("transform", "rotate(" + clockAngle.toFixed(1) + " 819 660)");
+    }
+    waveLast = now;
+    requestAnimationFrame(waveFrame);
+  }
+
+
+  /* ---------- board mode ---------- */
+  function syncBoardTools() {
+    $("bAsm").setAttribute("aria-pressed", $("modeAsm").getAttribute("aria-pressed"));
+    $("bBin").setAttribute("aria-pressed", $("modeBin").getAttribute("aria-pressed"));
+    $("bQ").textContent = $("qBtn").textContent;
+    $("bTheme").textContent = $("themeBtn").textContent;
+    const src = $("examples");
+    const dst = $("bExamples");
+    if (dst.options.length !== src.options.length) {
+      clear(dst);
+      Array.prototype.forEach.call(src.options, function (o) {
+        const c = document.createElement("option");
+        c.value = o.value;
+        c.textContent = o.textContent;
+        dst.appendChild(c);
+      });
+    }
+    dst.value = src.value;
+  }
+  function setBoard(on) {
+    document.body.classList.toggle("board", on);
+    try { window.localStorage.setItem("insideCpu.board", on ? "1" : "0"); } catch (e) { /* ignore */ }
+    if (on) {
+      syncBoardTools();
+      const root = document.documentElement;
+      if (root.requestFullscreen && !document.fullscreenElement) {
+        try { root.requestFullscreen().catch(function () { /* fullscreen not allowed here */ }); } catch (e) { /* ignore */ }
+      }
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      try { document.exitFullscreen().catch(function () { /* ignore */ }); } catch (e) { /* ignore */ }
+    }
+  }
+  function wireBoard() {
+    $("boardBtn").addEventListener("click", function () { setBoard(true); });
+    $("boardExit").addEventListener("click", function () { setBoard(false); });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-proxy]"), function (b) {
+      b.addEventListener("click", function () {
+        $(b.getAttribute("data-proxy")).click();
+        syncBoardTools();
+      });
+    });
+    $("bExamples").addEventListener("change", function () {
+      $("examples").value = this.value;
+      $("examples").dispatchEvent(new Event("change"));
+    });
+    let wasOn = false;
+    try { wasOn = window.localStorage.getItem("insideCpu.board") === "1"; } catch (e) { wasOn = false; }
+    if (wasOn) { document.body.classList.add("board"); syncBoardTools(); }
+  }
+
+  function drawClockTicks() {
+    const g = $("clockTicks");
+    for (let i = 0; i < 12; i++) {
+      const a = i * Math.PI / 6;
+      el("line", { x1: 819 + Math.sin(a) * 17, y1: 660 - Math.cos(a) * 17, x2: 819 + Math.sin(a) * 21, y2: 660 - Math.cos(a) * 21, style: "stroke: var(--ink); stroke-width: 1.5" }, g);
+    }
+  }
+
+  function init() {
+    cpu = freshCpu();
+    log = freshLog();
+    drawClockTicks();
+    buildWave();
+    requestAnimationFrame(waveFrame);
+    fillExamples();
+    fillIsa();
+    wire();
+    wireBoard();
+    opts.speed = parseInt($("speed").value, 10) || 2;
+    $("speedName").textContent = SPEED_NAMES[opts.speed - 1];
+    $("src").value = EXAMPLES[0].src();
+    loadProgram();
+  }
+
+
+  window.cpuBridge = {
+    mem: function () { return mem; },
+    mar: function () { return cpu.mar; },
+    pc: function () { return cpu.pc; },
+    label: function (w) { return wordText(w); },
+    short: function (w) { return wordShort(w); },
+    base: function () { return opts.base; },
+    pause: function () { stopRun(); }
+  };
+
+  init();
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const GX = 660;
+  const GY = 330;
+  const GRID = 448;
+  const SPLIT_X = 430;
+  const DUR = [3000, 2100, 1400, 800, 350];
+
+  let K = 2;
+  let N = 4;
+  let SIZE = 4;
+  let CELL = 112;
+  let addr = 0;
+  let bigMem = [];
+  let stepIdx = 0;
+  let busy = false;
+  let playing = false;
+  let gen = 0;
+  let mode = "explore";
+  let speed = 2;
+  let found = 0;
+  let tries = 0;
+  let solved = false;
+  let badCell = -1;
+  let lastFocus = null;
+  const lit = { seg1: false, seg2: false, row: false, col: false, cell: false, data: false, ctrl: false, mar: false };
+
+  function host() { return window.cpuBridge || null; }
+  function $(id) { return document.getElementById(id); }
+  function el(name, attrs, parent) {
+    const e = document.createElementNS(SVGNS, name);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (parent) { parent.appendChild(e); }
+    return e;
+  }
+  function txt(parent, x, y, s, attrs) {
+    const a = attrs || {};
+    a.x = x; a.y = y;
+    const t = el("text", a, parent);
+    t.textContent = s;
+    return t;
+  }
+  function clear(n) { while (n.firstChild) { n.removeChild(n.firstChild); } }
+  function bits(v, n) { let s = (v & ((1 << n) - 1)).toString(2); while (s.length < n) { s = "0" + s; } return s; }
+  function rowOf(a) { return (a >> K) & (SIZE - 1); }
+  function colOf(a) { return a & (SIZE - 1); }
+  function cellX(c) { return GX + c * CELL; }
+  function cellY(r) { return GY + r * CELL; }
+  function lineX(c) { return cellX(c) + (K === 2 ? CELL * 0.84 : CELL / 2); }
+  function lineY(r) { return cellY(r) + (K === 2 ? CELL * 0.82 : CELL / 2); }
+  function bitOf(b) { return (addr >> b) & 1; }
+  function linked() { return K === 2 && !!host(); }
+  function base() { return linked() ? host().base() : 0; }
+  function maxAddr() { return SIZE * SIZE - 1; }
+
+  /* contents of a location, from the app's RAM (small grid) or made-up data (big grid) */
+  function info(a) {
+    if (linked()) {
+      if (a < base()) { return { na: true, text: "", tok: "", bits: "", den: "" }; }
+      const w = host().mem()[a];
+      if (!w || w.kind === "empty") { return { text: "", tok: host().short({ v: 0, kind: "data" }), bits: "00000000", den: "0" }; }
+      return { text: host().label(w), tok: host().short(w), bits: bits(w.v, 8), den: host().label(w) };
+    }
+    const v = bigMem[a];
+    return { text: String(v), tok: bits(v, 8), bits: bits(v, 8), den: String(v) };
+  }
+
+  /* geometry of the address lines */
+  function cellCx(b) { return 200 - N * 14 + 14 + (N - 1 - b) * 28; }
+  function yT(b) { return 240 + b * 14; }
+  function seg1(b) { return [[cellCx(b), 166], [cellCx(b), yT(b)], [SPLIT_X, yT(b)]]; }
+  function seg2(b) {
+    if (b < K) { return [[SPLIT_X, yT(b)], [GX, yT(b)]]; }
+    const xt = 470 + (N - 1 - b) * 14;
+    const yi = 520 + (b - K) * 14;
+    return [[SPLIT_X, yT(b)], [xt, yT(b)], [xt, yi], [520, yi]];
+  }
+  function pts(p) { return p.map(function (q) { return q[0] + "," + q[1]; }).join(" "); }
+
+  function setSize(k) {
+    K = k; N = 2 * k; SIZE = 1 << k; CELL = GRID / SIZE;
+    if (bigMem.length === 0) { for (let i = 0; i < 256; i++) { bigMem.push(Math.floor(Math.random() * 256)); } }
+    $("mgSmall").setAttribute("aria-pressed", k === 2 ? "true" : "false");
+    $("mgBig").setAttribute("aria-pressed", k === 4 ? "true" : "false");
+    $("mgValsBox").hidden = k === 2;
+    $("mgAddrIn").max = String(maxAddr());
+    $("mgColTitle").textContent = "COLUMN DECODER (" + K + " lines in → " + SIZE + " lines out)";
+    $("mgRowTitle").textContent = "ROW DECODER (" + K + " → " + SIZE + ")";
+    $("mgBusLabel").textContent = "ADDRESS BUS (" + N + " lines)";
+    $("mgNote").textContent = k === 2 ?
+      "This grid holds the program that is in RAM in the main diagram. Each square is one memory location. Real memory chips select single bits this way, with several chips side by side making up each location." :
+      "A bigger RAM with made-up contents: 8 address lines give 2⁸ = 256 locations. Simplified: in a real chip each crossing point stores one bit, and several chips side by side make up each byte.";
+    drawStatic();
+  }
+
+  function drawStatic() {
+    const cells = $("mgCells");
+    clear(cells);
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const a = r * SIZE + c;
+        const na = linked() && a < base();
+        const rc = el("rect", { "class": "mg-cell" + (na ? " na" : ""), x: cellX(c), y: cellY(r), width: CELL, height: CELL, "data-mga": a }, cells);
+        const t = el("title", {}, rc);
+        t.textContent = na ? "Address " + a + " is not used (RAM starts at " + base() + ")" :
+          "Address " + a + " (" + bits(a, N) + ") · row " + r + " (" + bits(r, K) + ") · column " + c + " (" + bits(c, K) + ")";
+      }
+    }
+    const rn = $("mgRowNums");
+    const cn = $("mgColNums");
+    clear(rn); clear(cn);
+    for (let i = 0; i < SIZE; i++) {
+      const lab = K === 2 ? bits(i, 2) + " = " + i : String(i);
+      txt(rn, 604, lineY(i) + 5, lab, { "text-anchor": "end", "font-size": K === 2 ? 15 : 11 });
+      txt(cn, K === 2 ? lineX(i) - 6 : lineX(i), 299, lab, { "text-anchor": K === 2 ? "end" : "middle", "font-size": K === 2 ? 15 : 11 });
+    }
+    const wl = $("mgWireLabels");
+    clear(wl);
+    for (let b = 0; b < N; b++) { txt(wl, 384, yT(b) - 3, "A" + b, { "font-size": 10 }); }
+  }
+
+  function drawBits(parent, valueStr, x, y, cw, ch, fs, opt) {
+    const g = el("g", { "class": "mg-bits" }, parent);
+    const n = valueStr.length;
+    for (let i = 0; i < n; i++) {
+      const cg = el("g", opt && opt.click ? { "class": "mg-bitbtn", "data-mgbit": n - 1 - i } : {}, g);
+      el("rect", { x: x + i * cw, y: y, width: cw, height: ch, "class": opt && opt.hi && valueStr.charAt(i) === "1" ? "hi" : "" }, cg);
+      txt(cg, x + i * cw + cw / 2, y + ch / 2 + fs * 0.36, valueStr.charAt(i), { "text-anchor": "middle", "font-size": fs });
+    }
+    if (opt && opt.split) {
+      el("line", { x1: x + opt.split * cw, y1: y - 5, x2: x + opt.split * cw, y2: y + ch + 5, style: "stroke: var(--red); stroke-width: 3" }, g);
+    }
+    return g;
+  }
+
+  function render() {
+    const mb = $("mgMarBits");
+    clear(mb);
+    const x0 = 200 - N * 14;
+    for (let b = N - 1; b >= 0; b--) { txt(mb, cellCx(b), 133, "A" + b, { "text-anchor": "middle", "font-size": 10, "class": "mg-muted" }); }
+    drawBits(mb, bits(addr, N), x0, 138, 28, 28, 17, { click: mode === "explore", hi: true, split: lit.seg2 ? K : 0 });
+    $("mgMarDen").textContent = mode === "find" && !solved ? "" : "= " + addr;
+
+    const md = $("mgMdrBits");
+    clear(md);
+    const inf = info(addr);
+    if (lit.data && !inf.na) {
+      drawBits(md, inf.bits, 88, 806, 28, 28, 17, {});
+      $("mgMdrDen").textContent = "= " + (inf.den || "0");
+    } else {
+      $("mgMdrDen").textContent = "";
+    }
+
+    const w = $("mgWires");
+    clear(w);
+    for (let b = 0; b < N; b++) {
+      const on = bitOf(b) === 1;
+      el("polyline", { "class": "mg-wire" + (lit.seg1 && on ? " on" : ""), points: pts(seg1(b)) }, w);
+      el("polyline", { "class": "mg-wire" + (lit.seg2 && on ? " on" : ""), points: pts(seg2(b)) }, w);
+    }
+    const di = $("mgDecIn");
+    clear(di);
+    if (lit.seg2) {
+      for (let b = 0; b < N; b++) {
+        const cls = bitOf(b) ? "mg-red" : "";
+        if (b < K) { txt(di, 668, yT(b) + 4, String(bitOf(b)), { "font-size": 12, "class": cls }); }
+        else { txt(di, 528, 520 + (b - K) * 14 + 4, String(bitOf(b)), { "font-size": 12, "class": cls }); }
+      }
+    }
+    const r = rowOf(addr);
+    const c = colOf(addr);
+    $("mgRowRes").textContent = lit.row ? bits(r, K) + " → row " + r : "";
+    $("mgColRes").textContent = lit.col ? bits(c, K) + " → column " + c : "";
+
+    const sl = $("mgSelLines");
+    clear(sl);
+    for (let i = 0; i < SIZE; i++) {
+      el("line", { "class": "mg-sel", x1: 610, y1: lineY(i), x2: GX + GRID, y2: lineY(i) }, sl);
+      el("line", { "class": "mg-sel", x1: lineX(i), y1: 304, x2: lineX(i), y2: GY + GRID }, sl);
+    }
+    if (lit.row) { el("line", { "class": "mg-sel on", x1: 610, y1: lineY(r), x2: GX + GRID, y2: lineY(r) }, sl); }
+    if (lit.col) { el("line", { "class": "mg-sel on", x1: lineX(c), y1: 304, x2: lineX(c), y2: GY + GRID }, sl); }
+
+    const v = $("mgValsLayer");
+    clear(v);
+    const showAll = K === 2 || $("mgVals").checked;
+    if (showAll) {
+      for (let a = 0; a <= maxAddr(); a++) {
+        const ia = info(a);
+        const cx = cellX(colOf(a)) + CELL / 2;
+        const cy = cellY(rowOf(a)) + CELL / 2;
+        if (K === 2) {
+          txt(v, cellX(colOf(a)) + 7, cellY(rowOf(a)) + 17, String(a), { "font-size": 13, "class": "mg-val mg-muted" });
+          if (ia.na) { txt(v, cellX(colOf(a)) + CELL * 0.42, cy + 4, "not used", { "text-anchor": "middle", "font-size": 14, "class": "mg-val mg-muted" }); }
+          else { txt(v, cellX(colOf(a)) + CELL * 0.42, cy + 4, ia.text, { "text-anchor": "middle", "font-size": 22, "class": "mg-val", "font-weight": a === addr && lit.cell ? 700 : 400 }); }
+        } else {
+          txt(v, cx, cy + 4, ia.text, { "text-anchor": "middle", "font-size": 10, "class": "mg-val mg-muted" });
+        }
+      }
+    }
+
+    const pl = $("mgPick");
+    clear(pl);
+    if (lit.cell) {
+      el("rect", { "class": "mg-pick" + (mode === "find" && solved ? " good" : ""), x: cellX(c), y: cellY(r), width: CELL, height: CELL }, pl);
+      const ia2 = info(addr);
+      if (K === 4 && !showAll && lit.data) {
+        txt(pl, cellX(c) + CELL / 2, cellY(r) + CELL / 2 + 4, ia2.text, { "text-anchor": "middle", "font-size": 10, "font-weight": 700, "class": "mg-val" });
+      }
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("#mgCells .mg-cell"), function (n) {
+      n.classList.toggle("bad", parseInt(n.getAttribute("data-mga"), 10) === badCell);
+    });
+
+    $("mgDbus").setAttribute("class", "mg-dbus" + (lit.data ? " on" : ""));
+    $("mgCtrl").setAttribute("class", "mg-wire" + (lit.ctrl ? " on" : ""));
+    $("mgSig").textContent = lit.ctrl ? "READ ENABLE" : "";
+    const h = $("mgHls");
+    clear(h);
+    if (lit.mar) { el("rect", { "class": "mg-hl", x: 54, y: 86, width: 292, height: 96 }, h); }
+    renderMaths();
+    renderButtons();
+  }
+
+  function renderMaths() {
+    const hideDen = mode === "find" && !solved;
+    const r = rowOf(addr);
+    const c = colOf(addr);
+    let html = "<span>Address " + (hideDen ? "?" : addr) + " = <code>" + bits(addr, N) + "</code></span>";
+    if (stepIdx >= 2) {
+      html += "<span>row bits <code class=\"r\">" + bits(r, K) + "</code>" + (stepIdx >= 3 ? " = " + r : "") + "</span>";
+      html += "<span>column bits <code class=\"r\">" + bits(c, K) + "</code>" + (stepIdx >= 4 ? " = " + c : "") + "</span>";
+    }
+    if (stepIdx >= 5) { html += "<span>row × " + SIZE + " + column = " + r + " × " + SIZE + " + " + c + " = <b>" + addr + "</b></span>"; }
+    $("mgMaths").innerHTML = html;
+  }
+  function renderButtons() {
+    const done = stepIdx >= STEPS.length;
+    const blocked = busy || done || (mode === "find" && !solved) || info(addr).na;
+    $("mgStep").disabled = blocked;
+    $("mgPlay").disabled = blocked;
+    $("mgPlay").textContent = playing ? "Playing…" : "Play all";
+    $("mgAddrBox").hidden = mode === "find";
+    $("mgNew").hidden = mode !== "find";
+  }
+  function setSay(s, cls) { const p = $("mgSay"); p.textContent = s; p.className = "mg-say" + (cls ? " " + cls : ""); }
+  function setPhase(h) { $("mgPhase").innerHTML = h; }
+
+  function dur() { return DUR[speed - 1]; }
+  function moveAlong(node, path, done) {
+    const myGen = gen;
+    const segs = [];
+    let total = 0;
+    for (let i = 1; i < path.length; i++) {
+      const L = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+      segs.push(L); total += L;
+    }
+    function at(d) {
+      for (let i = 0; i < segs.length; i++) {
+        if (d <= segs[i] || i === segs.length - 1) {
+          const f = segs[i] ? Math.min(1, d / segs[i]) : 1;
+          return [path[i][0] + (path[i + 1][0] - path[i][0]) * f, path[i][1] + (path[i + 1][1] - path[i][1]) * f];
+        }
+        d -= segs[i];
+      }
+      return path[path.length - 1];
+    }
+    const d0 = dur();
+    const t0 = performance.now();
+    node.setAttribute("transform", "translate(" + path[0][0] + "," + path[0][1] + ")");
+    function frame(now) {
+      if (myGen !== gen) { if (node.parentNode) { node.parentNode.removeChild(node); } return; }
+      const k = Math.min(1, (now - t0) / d0);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const p = at(total * e);
+      node.setAttribute("transform", "translate(" + p[0].toFixed(1) + "," + p[1].toFixed(1) + ")");
+      if (k < 1) { requestAnimationFrame(frame); }
+      else {
+        setTimeout(function () {
+          if (node.parentNode) { node.parentNode.removeChild(node); }
+          if (myGen === gen) { done(); }
+        }, 120);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  function makeDot(bit) {
+    const g = el("g", { "class": "mg-dot " + (bit ? "one" : "zero") }, $("mgDots"));
+    el("circle", { r: 8 }, g);
+    txt(g, 0, 4, String(bit), { "text-anchor": "middle" });
+    return g;
+  }
+  function makeTok(label) {
+    const g = el("g", { "class": "mg-tok" }, $("mgDots"));
+    const r = el("rect", { rx: 5, ry: 5 }, g);
+    const t = txt(g, 0, 6, label, { "text-anchor": "middle" });
+    let w = 0;
+    try { w = t.getComputedTextLength(); } catch (e) { w = label.length * 10; }
+    if (!w) { w = label.length * 10; }
+    r.setAttribute("x", -(w / 2 + 8)); r.setAttribute("y", -15);
+    r.setAttribute("width", w + 16); r.setAttribute("height", 30);
+    return g;
+  }
+  function runAll(jobs, done) {
+    let left = jobs.length;
+    if (!left) { setTimeout(done, 300); return; }
+    jobs.forEach(function (j) { moveAlong(j.node, j.path, function () { left--; if (left === 0) { done(); } }); });
+  }
+
+  const STEPS = [
+    {
+      phase: "Address bus",
+      say: function () { return "The MAR puts the address " + bits(addr, N) + " onto the address bus. There is one wire for each bit: a 1 is a high voltage (red), a 0 is low. All " + N + " bits travel at the same time."; },
+      run: function (done) {
+        lit.mar = true;
+        render();
+        const jobs = [];
+        for (let b = 0; b < N; b++) { jobs.push({ node: makeDot(bitOf(b)), path: seg1(b) }); }
+        runAll(jobs, function () { lit.seg1 = true; done(); });
+      }
+    },
+    {
+      phase: "Split",
+      say: function () {
+        return "Inside the memory, the address is split in two. The high " + K + " bits (A" + (N - 1) + "–A" + K + " = " + bits(rowOf(addr), K) + ") go to the row decoder. The low " + K + " bits (A" + (K - 1) + "–A0 = " + bits(colOf(addr), K) + ") go to the column decoder.";
+      },
+      run: function (done) {
+        lit.mar = false;
+        const jobs = [];
+        for (let b = 0; b < N; b++) { jobs.push({ node: makeDot(bitOf(b)), path: seg2(b) }); }
+        runAll(jobs, function () { lit.seg2 = true; done(); });
+      }
+    },
+    {
+      phase: "Row decoder",
+      say: function () { return "The row decoder has " + K + " inputs and " + SIZE + " outputs. It turns " + bits(rowOf(addr), K) + " into exactly one active row line: row " + rowOf(addr) + ". The other rows stay off."; },
+      run: function (done) { lit.row = true; render(); setTimeout(done, Math.min(900, dur() * 0.5)); }
+    },
+    {
+      phase: "Column decoder",
+      say: function () { return "The column decoder does the same with the low bits: " + bits(colOf(addr), K) + " switches on column " + colOf(addr) + " only."; },
+      run: function (done) { lit.col = true; render(); setTimeout(done, Math.min(900, dur() * 0.5)); }
+    },
+    {
+      phase: "Location selected",
+      say: function () {
+        return "Only one location sits where the active row and the active column cross: row " + rowOf(addr) + ", column " + colOf(addr) + ". That is address " + addr + " (" + rowOf(addr) + " × " + SIZE + " + " + colOf(addr) + "). With " + N + " address lines there are 2" + (N === 4 ? "⁴" : "⁸") + " = " + (SIZE * SIZE) + " locations to choose from.";
+      },
+      run: function (done) { lit.cell = true; render(); setTimeout(done, Math.min(900, dur() * 0.5)); }
+    },
+    {
+      phase: "Read",
+      say: function () {
+        const ia = info(addr);
+        return "The Control Unit sends READ ENABLE on the control bus. The contents of the selected location (" + (ia.text || "0") + ") travel out along the data bus into the MDR.";
+      },
+      run: function (done) {
+        lit.ctrl = true;
+        render();
+        const x = lineX(colOf(addr));
+        const node = makeTok(info(addr).tok || "0");
+        runAll([{ node: node, path: [[x, lineY(rowOf(addr))], [x, 802], [656, 802], [340, 802]] }], function () { lit.data = true; done(); });
+      }
+    }
+  ];
+
+  function step(cb) {
+    if (busy || stepIdx >= STEPS.length) { if (cb) { cb(); } return; }
+    busy = true;
+    const s = STEPS[stepIdx];
+    setPhase("Step " + (stepIdx + 1) + " of " + STEPS.length + " · <b>" + s.phase + "</b>");
+    if (!(mode === "find" && stepIdx === 0)) { setSay(s.say()); }
+    renderButtons();
+    const myGen = gen;
+    s.run(function () {
+      if (myGen !== gen) { return; }
+      stepIdx++;
+      busy = false;
+      render();
+      if (stepIdx >= STEPS.length) {
+        if (mode === "find") { renderScore(); } else { setPhase("Done · <b>address " + addr + "</b>"); }
+      }
+      if (cb) { cb(); }
+    });
+  }
+  function playAll() {
+    if (busy) { return; }
+    playing = true;
+    function next() {
+      if (!playing) { return; }
+      if (stepIdx >= STEPS.length) { playing = false; renderButtons(); return; }
+      step(function () { setTimeout(next, Math.min(1400, dur() * 0.6)); });
+    }
+    next();
+  }
+  function resetSteps() {
+    gen++;
+    clear($("mgDots"));
+    busy = false;
+    playing = false;
+    stepIdx = 0;
+    Object.keys(lit).forEach(function (k) { lit[k] = false; });
+    badCell = -1;
+  }
+  function setAddress(a) {
+    addr = Math.max(0, Math.min(maxAddr(), a));
+    $("mgAddrIn").value = String(addr);
+    resetSteps();
+    render();
+    setPhase("Ready · <b>address " + addr + "</b>");
+    if (info(addr).na) {
+      setSay("Address " + addr + " isn't used because this RAM starts at address " + base() + ". Pick another address.", "bad");
+    } else {
+      setSay("The MAR holds " + bits(addr, N) + ". Press Next step to send it to memory. Click the bits in the MAR, type an address, or click a square to choose a different one.");
+    }
+  }
+  function randomAddr() {
+    let a = addr;
+    let guard = 0;
+    while ((a === addr || info(a).na) && guard < 100) { a = base() + Math.floor(Math.random() * (maxAddr() + 1 - base())); guard++; }
+    return a;
+  }
+  function newChallenge() {
+    addr = randomAddr();
+    solved = false;
+    resetSteps();
+    render();
+    renderScore();
+    setSay("The MAR holds " + bits(addr, N) + ". Which square will it select? Split it into row bits and column bits, then click the square.");
+  }
+  function renderScore() {
+    if (mode !== "find") { return; }
+    setPhase("Find the location · <b>" + bits(addr, N) + "</b> · found " + found + " of " + tries + " tries");
+  }
+  function clickCell(a) {
+    if (info(a).na) { return; }
+    if (mode === "explore") { if (!busy) { setAddress(a); } return; }
+    if (solved || busy) { return; }
+    tries++;
+    if (a === addr) {
+      solved = true;
+      found++;
+      badCell = -1;
+      renderScore();
+      setSay("Correct: row " + rowOf(addr) + " (" + bits(rowOf(addr), K) + "), column " + colOf(addr) + " (" + bits(colOf(addr), K) + "), which is address " + addr + ". Watch it happen, then press New address.", "good");
+      render();
+      const keep = speed;
+      speed = Math.max(speed, 4);
+      setTimeout(function () {
+        function next() {
+          if (stepIdx >= STEPS.length || mode !== "find") { speed = keep; return; }
+          step(function () { setTimeout(next, 250); });
+        }
+        next();
+      }, 600);
+    } else {
+      badCell = a;
+      renderScore();
+      setSay("That square is row " + rowOf(a) + ", column " + colOf(a) + ", which is " + bits(a, N) + " (address " + a + "). The first " + K + " bits pick the row and the last " + K + " pick the column. Try again.", "bad");
+      render();
+    }
+  }
+  function setMode(m) {
+    mode = m;
+    $("mgExplore").setAttribute("aria-pressed", m === "explore" ? "true" : "false");
+    $("mgFind").setAttribute("aria-pressed", m === "find" ? "true" : "false");
+    if (m === "find") { found = 0; tries = 0; newChallenge(); }
+    else { solved = false; setAddress(addr); }
+  }
+  function changeSize(k) {
+    resetSteps();
+    const keepAddr = addr;
+    setSize(k);
+    if (mode === "find") { found = 0; tries = 0; newChallenge(); }
+    else { setAddress(k === 2 ? (keepAddr <= 15 ? keepAddr : 0) : keepAddr); }
+  }
+
+  function open() {
+    const h = host();
+    if (h && h.pause) { h.pause(); }
+    lastFocus = document.activeElement;
+    let start = 0;
+    if (h) {
+      const m = h.mar();
+      const pc = h.pc();
+      start = m !== null && m !== undefined ? m : (pc !== null && pc !== undefined ? pc : 0);
+      if (start > 15 || start < 0) { start = 0; }
+    }
+    mode = "explore";
+    $("mgExplore").setAttribute("aria-pressed", "true");
+    $("mgFind").setAttribute("aria-pressed", "false");
+    solved = false;
+    $("mgModal").hidden = false;
+    document.body.classList.add("mg-open");
+    setSize(2);
+    setAddress(start);
+    if (h && h.mar() !== null && h.mar() !== undefined) {
+      setSay("The MAR in the main diagram holds " + bits(addr, N) + ". Press Next step to see how memory uses it to find the right location.");
+    }
+    $("mgClose").focus();
+  }
+  function close() {
+    resetSteps();
+    $("mgModal").hidden = true;
+    document.body.classList.remove("mg-open");
+    if (lastFocus && lastFocus.focus) { lastFocus.focus(); }
+  }
+
+  function wire() {
+    const opener = $("mgOpen");
+    if (opener) { opener.addEventListener("click", open); }
+    $("mgClose").addEventListener("click", close);
+    $("mgModal").addEventListener("click", function (e) { if (e.target === this) { close(); } });
+    $("mgStep").addEventListener("click", function () { step(null); });
+    $("mgPlay").addEventListener("click", playAll);
+    $("mgReset").addEventListener("click", function () {
+      if (mode === "find") { resetSteps(); render(); renderScore(); return; }
+      setAddress(addr);
+    });
+    $("mgRand").addEventListener("click", function () { setAddress(randomAddr()); });
+    $("mgNew").addEventListener("click", newChallenge);
+    $("mgAddrIn").addEventListener("change", function () {
+      const n = parseInt(this.value, 10);
+      if (isNaN(n)) { this.value = String(addr); return; }
+      setAddress(n);
+    });
+    $("mgSpeed").addEventListener("input", function () { speed = parseInt(this.value, 10); });
+    $("mgVals").addEventListener("change", render);
+    $("mgExplore").addEventListener("click", function () { setMode("explore"); });
+    $("mgFind").addEventListener("click", function () { setMode("find"); });
+    $("mgSmall").addEventListener("click", function () { if (K !== 2) { changeSize(2); } });
+    $("mgBig").addEventListener("click", function () { if (K !== 4) { changeSize(4); } });
+    $("mgSvg").addEventListener("click", function (e) {
+      let t = e.target;
+      while (t && t !== this) {
+        if (t.getAttribute && t.getAttribute("data-mga") !== null) { clickCell(parseInt(t.getAttribute("data-mga"), 10)); return; }
+        if (t.getAttribute && t.getAttribute("data-mgbit") !== null) {
+          if (mode !== "explore" || busy) { return; }
+          setAddress(addr ^ (1 << parseInt(t.getAttribute("data-mgbit"), 10)));
+          return;
+        }
+        t = t.parentNode;
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if ($("mgModal").hidden) { return; }
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+      if (e.key === "PageDown") { e.preventDefault(); if (!$("mgStep").disabled) { step(null); } return; }
+      if (tag === "input" || tag === "button" || tag === "select") { return; }
+      if (e.key === " " || e.key === "ArrowRight") { e.preventDefault(); if (!$("mgStep").disabled) { step(null); } }
+    });
+  }
+
+  speed = parseInt($("mgSpeed").value, 10) || 2;
+  wire();
+})();
+</script>
+</body>
+</html>
